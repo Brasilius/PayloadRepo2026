@@ -4,28 +4,7 @@ import queue
 import time
 
 data_queue = queue.Queue()
-    """
-    def reciever():
-        # Start the compiled C++ program
-        proc = subprocess.Popen(['./recievermodule'], stdout=subprocess.PIPE, text=True, bufsize=1)
-        
-        # Read the C++ output line by line
-        for line in iter(proc.stdout.readline, ''):
-            clean_line = line.strip()
-            if clean_line:
-                data_queue.put(clean_line)
-                
-        proc.stdout.close()
-        proc.wait()
-    """
-
-    """
-    def transmit():
-        # Example placeholder for transmission logic
-        proc = subprocess.Popen(['./example_program2'], stdin=subprocess.PIPE, text=True, bufsize=1)
-        # Write to proc.stdin.write("data\n") when necessary
-        pass
-    """
+   
 def read_soil_conductivity(port="/dev/ttyUSB0", executable_path="./modbus_reader"): 
     """
     Executes the C++ Modbus reader program and parses the electrical conductivity.
