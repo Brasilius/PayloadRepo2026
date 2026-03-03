@@ -4,82 +4,94 @@ import queue
 import time
 
 data_queue = queue.Queue()
-
-def reciever():
-    # Start the compiled C++ program
-    proc = subprocess.Popen(['./recievermodule'], stdout=subprocess.PIPE, text=True, bufsize=1)
-    
-    # Read the C++ output line by line
-    for line in iter(proc.stdout.readline, ''):
-        clean_line = line.strip()
-        if clean_line:
-            data_queue.put(clean_line)
-            
-    proc.stdout.close()
-    proc.wait()
-
-def transmit():
-    # Example placeholder for transmission logic
-    proc = subprocess.Popen(['./example_program2'], stdin=subprocess.PIPE, text=True, bufsize=1)
-    # Write to proc.stdin.write("data\n") when necessary
-    pass
-
-def get_electrical_conductivity(cpp_executable_path: str, simulated_sensor_reply: str = None) -> int:
     """
-    Executes the C++ Modbus program to get the request frame, 
-    communicates with the sensor, and parses the reply to an integer.
+    def reciever():
+        # Start the compiled C++ program
+        proc = subprocess.Popen(['./recievermodule'], stdout=subprocess.PIPE, text=True, bufsize=1)
+        
+        # Read the C++ output line by line
+        for line in iter(proc.stdout.readline, ''):
+            clean_line = line.strip()
+            if clean_line:
+                data_queue.put(clean_line)
+                
+        proc.stdout.close()
+        proc.wait()
     """
-    # 1. Execute the C++ program to get the interrogation frame
+
+    """
+    def transmit():
+        # Example placeholder for transmission logic
+        proc = subprocess.Popen(['./example_program2'], stdin=subprocess.PIPE, text=True, bufsize=1)
+        # Write to proc.stdin.write("data\n") when necessary
+        pass
+    """
+def read_soil_conductivity(port="/dev/ttyUSB0", executable_path="./modbus_reader"): 
+    """
+    Executes the C++ Modbus reader program and parses the electrical conductivity.
+    """
     try:
-        process = subprocess.run(
-            [cpp_executable_path, "request"], 
-            capture_output=True, 
-            text=True, 
+        # Execute the C++ compiled program
+        result = subprocess.run(
+            [executable_path, port],
+            capture_output=True,
+            text=True,
             check=True
         )
-        interrogation_frame = process.stdout.strip()
-        print(f"Transmitting to sensor: {interrogation_frame}")
+
+        # Remove any trailing newlines or whitespace
+        hex_output = result.stdout.strip()
+
+        if not hex_output:
+            print("Error: No output received from the C++ program.")
+            return None
+
+        # A valid 1-register read response is exactly 7 bytes (14 hexadecimal characters)
+        if len(hex_output) < 14:
+            print(f"Error: Incomplete response received: {hex_output}")
+            return None
+
+        # Parse the Modbus RTU response frame
+        # Address (chars 0-1)
+        # Function Code (chars 2-3)
+        # Byte Count (chars 4-5)
+        # Data (chars 6-9) -> Electrical Conductivity
+        # CRC (chars 10-13)
+        
+        data_hex = hex_output[6:10]
+
+        # Convert the 2-byte hexadecimal data to a base-10 integer
+        conductivity = int(data_hex, 16)
+
+        return conductivity
+
     except subprocess.CalledProcessError as e:
-        print(f"Error executing C++ program: {e}")
-        return -1
-
-    # 2. Transmit the frame via Serial (Placeholder for actual serial.write)
-    # In a live environment, you would send bytes.fromhex(interrogation_frame) via PySerial
-    
-    # 3. Receive the Reply Frame
-    # For demonstration, we use a simulated valid reply if none is provided.
-    # Structure of simulated reply:
-    # Time(8) + Addr(2) + Func(2) + ValidBytes(2) + Data(4) + CRC(4) + Time(8)
-    # Example Data = 01F4 (hex) = 500 (decimal)
-    reply_hex = simulated_sensor_reply or "65E5A1B201030201F4B85365E5A1B2"
-    print(f"Received from sensor:   {reply_hex}")
-
-    # 4. Parse the Reply Frame
-    # Each byte is represented by 2 hexadecimal characters.
-    # Index 0-7: Initial 4-byte time (8 chars)
-    # Index 8-9: Address code (2 chars)
-    # Index 10-11: Function code (2 chars)
-    # Index 12-13: Quantity of valid bytes (2 chars)
-    # Index 14-17: Data area for register 0015H (4 chars)
-    
-    try:
-        # Extract the 4 characters corresponding to the 2-byte data area
-        data_hex = reply_hex[14:18]
-        
-        # Convert the hexadecimal string to a base-10 integer
-        electrical_conductivity = int(data_hex, 16)
-        
-        return electrical_conductivity
-        
-    except (ValueError, IndexError) as e:
-        print(f"Failed to parse the reply frame: {e}")
-        return -1
-
-
+        print(f"Subprocess failed with return code {e.returncode}")
+        print(f"Standard Error: {e.stderr}")
+        return None
+    except FileNotFoundError:
+        print(f"Error: The executable '{executable_path}' was not found. Ensure it is compiled and the path is correct.")
+        return None
 
 
 
 def main():
+  # Define the serial port and the path to your compiled C++ executable
+    sensor_port = "/dev/ttyUSB0"
+    reader_executable = "./modbus_reader"
+    
+    print(f"Requesting data from {sensor_port}...")
+    
+    conductivity_value = read_soil_conductivity(
+        port=sensor_port, 
+        executable_path=reader_executable
+    )
+    
+    if conductivity_value is not None:
+        print(f"Electrical Conductivity: {conductivity_value}")
+
+    """
+  Actually FUCK this main function
     print("Hello from payloadrepo2026!")
     
     # Start the receiver thread
@@ -96,6 +108,7 @@ def main():
             pass
             
         time.sleep(.01) # anti CPU death
+    """
 
 if __name__ == "__main__":
     main()
