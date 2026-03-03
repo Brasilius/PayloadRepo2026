@@ -1,24 +1,20 @@
 #include <iostream>
-#include <vector>
 #include <iomanip>
-#include <cstdint>
-#include <chrono>
-#include <sstream>
+#include <fcntl.h>
+#include <termios.h>
+#include <unistd.h>
+#include <cstring>
+#include <stdint.h>
 
-// Constants for the specific soil sensor request
-const uint8_t DEFAULT_ADDRESS = 0x01;
-const uint8_t FUNC_READ_HOLDING = 0x03; // Function code for reading registers
-const uint16_t EC_REGISTER_ADDR = 0x0015;
-const uint16_t EC_REGISTER_LEN = 0x0001;
-
-// Modbus CRC-16 calculation (Polynomial: 0xA001)
-uint16_t calculate_crc16(const std::vector<uint8_t>& data) {
+// Modbus CRC-16 calculation
+uint16_t calculateCRC(uint8_t *buffer, int length) {
     uint16_t crc = 0xFFFF;
-    for (uint8_t byte : data) {
-        crc ^= byte;
-        for (int i = 0; i < 8; ++i) {
-            if (crc & 0x0001) {
-                crc = (crc >> 1) ^ 0xA001;
+    for (int pos = 0; pos < length; pos++) {
+        crc ^= (uint16_t)buffer[pos];
+        for (int i = 8; i != 0; i--) {
+            if ((crc & 0x0001) != 0) {
+                crc >>= 1;
+                crc ^= 0xA001;
             } else {
                 crc >>= 1;
             }
@@ -27,87 +23,100 @@ uint16_t calculate_crc16(const std::vector<uint8_t>& data) {
     return crc;
 }
 
-// Retrieves the current timestamp as a 4-byte array
-std::vector<uint8_t> get_4byte_timestamp() {
-    auto now = std::chrono::system_clock::now();
-    uint32_t epoch_seconds = static_cast<uint32_t>(std::chrono::system_clock::to_time_t(now));
+int main(int argc, char *argv[]) {
+    // Default to /dev/ttyUSB0 if no argument is provided
+    const char *portname = (argc > 1) ? argv[1] : "/dev/ttyUSB0";
     
-    std::vector<uint8_t> time_bytes(4);
-    time_bytes[0] = (epoch_seconds >> 24) & 0xFF;
-    time_bytes[1] = (epoch_seconds >> 16) & 0xFF;
-    time_bytes[2] = (epoch_seconds >> 8) & 0xFF;
-    time_bytes[3] = epoch_seconds & 0xFF;
-    return time_bytes;
-}
-
-// Formats a byte vector to a hexadecimal string
-std::string to_hex_string(const std::vector<uint8_t>& data) {
-    std::ostringstream oss;
-    for (uint8_t byte : data) {
-        oss << std::uppercase << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte);
+    // Open the serial port
+    int fd = open(portname, O_RDWR | O_NOCTTY | O_SYNC);
+    if (fd < 0) {
+        std::cerr << "Error opening " << portname << std::endl;
+        return 1;
     }
-    return oss.str();
-}
 
-// Constructs the Interrogation Frame
-void generate_interrogation_frame() {
-    std::vector<uint8_t> full_frame;
-    std::vector<uint8_t> modbus_payload;
+    // Configure the serial port (9600 baud, 8 data bits, No parity, 1 stop bit)
+    struct termios tty;
+    if (tcgetattr(fd, &tty) != 0) {
+        std::cerr << "Error from tcgetattr" << std::endl;
+        return 1;
+    }
 
-    // 1. Initial structure >_ 4-byte time
-    std::vector<uint8_t> start_time = get_4byte_timestamp();
-    full_frame.insert(full_frame.end(), start_time.begin(), start_time.end());
+    cfsetospeed(&tty, B9600);
+    cfsetispeed(&tty, B9600);
 
-    // 2. Modbus Payload (Interrogation)
-    modbus_payload.push_back(DEFAULT_ADDRESS);                  // Address code
-    modbus_payload.push_back(FUNC_READ_HOLDING);                // Function code
-    modbus_payload.push_back((EC_REGISTER_ADDR >> 8) & 0xFF);   // Register start address (High)
-    modbus_payload.push_back(EC_REGISTER_ADDR & 0xFF);          // Register start address (Low)
-    modbus_payload.push_back((EC_REGISTER_LEN >> 8) & 0xFF);    // Register length (High)
-    modbus_payload.push_back(EC_REGISTER_LEN & 0xFF);           // Register length (Low)
+    tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8; 
+    tty.c_iflag &= ~IGNBRK; 
+    tty.c_lflag = 0; 
+    tty.c_oflag = 0; 
+    tty.c_cc[VMIN]  = 0; 
+    tty.c_cc[VTIME] = 5; 
+    tty.c_iflag &= ~(IXON | IXOFF | IXANY); 
+    tty.c_cflag |= (CLOCAL | CREAD); 
+    tty.c_cflag &= ~(PARENB | PARODD); 
+    tty.c_cflag &= ~CSTOPB; 
+    tty.c_cflag &= ~CRTSCTS;
 
-    // 3. Error Check (CRC-16 on the Modbus payload)
-    uint16_t crc = calculate_crc16(modbus_payload);
-    modbus_payload.push_back(crc & 0xFF);                       // Check code low bit
-    modbus_payload.push_back((crc >> 8) & 0xFF);                // Check code high bit
+    if (tcsetattr(fd, TCSANOW, &tty) != 0) {
+        std::cerr << "Error from tcsetattr" << std::endl;
+        return 1;
+    }
 
-    full_frame.insert(full_frame.end(), modbus_payload.begin(), modbus_payload.end());
+    // Prepare the interrogation frame
+    // Address: 0x01, Function: 0x03 (Read Holding Register)
+    // Register Address: 0x0015, Register Length: 0x0001
+    uint8_t request[8];
+    request[0] = 0x01; 
+    request[1] = 0x03; 
+    request[2] = 0x00; 
+    request[3] = 0x15; 
+    request[4] = 0x00; 
+    request[5] = 0x01; 
 
-    // 4. End structure >_ 4-byte time
-    std::vector<uint8_t> end_time = get_4byte_timestamp();
-    full_frame.insert(full_frame.end(), end_time.begin(), end_time.end());
+    // Append CRC (Low bit first, High bit second)
+    uint16_t crc = calculateCRC(request, 6);
+    request[6] = crc & 0xFF;        
+    request[7] = (crc >> 8) & 0xFF; 
 
-    // Output in hexadecimal
-    std::cout << to_hex_string(full_frame) << std::endl;
-}
+    // Initial structure >= 4-byte time (At 9600 baud, 1 byte is ~1.04ms. 5000us = 5ms)
+    usleep(5000);
 
-// Parses the Reply Frame (Placeholder for Python input)
-// Expects hex string input from standard input or arguments
-void parse_reply_frame(const std::string& hex_input) {
-    // In a complete implementation, this function will:
-    // 1. Strip the initial 4-byte time.
-    // 2. Extract Address (1 byte), Function (1 byte), Quantity of valid bytes (1 byte).
-    // 3. Extract Data area (N bytes). For EC, this will be 2 bytes representing the conductivity value.
-    // 4. Extract Check code (2 bytes) and validate against the calculated CRC.
-    // 5. Strip the end 4-byte time.
-    // 6. Output the decimal parsed value for Python to consume.
-}
+    // Send the request
+    int written = write(fd, request, sizeof(request));
+    if (written != sizeof(request)) {
+        std::cerr << "Error writing to serial port." << std::endl;
+        close(fd);
+        return 1;
+    }
 
-int main(int argc, char* argv[]) {
-    // Basic argument routing for Python subprocess execution
-    if (argc > 1) {
-        std::string command = argv[1];
-        if (command == "request") {
-            generate_interrogation_frame();
-        } else if (command == "parse" && argc > 2) {
-            parse_reply_frame(argv[2]);
-        } else {
-            std::cerr << "Usage: " << argv[0] << " [request | parse <hex_string>]" << std::endl;
-            return 1;
+    // Read the reply frame
+    // Expected size for 1 register read: 1+1+1+2+2 = 7 bytes
+    uint8_t response[256];
+    int total_read = 0;
+    int bytes_read = 0;
+
+    // Small delay to allow sensor to process and respond
+    usleep(50000); 
+
+    do {
+        bytes_read = read(fd, response + total_read, sizeof(response) - total_read);
+        if (bytes_read > 0) {
+            total_read += bytes_read;
         }
+    } while (bytes_read > 0 && total_read < 7);
+
+    // End structure >= 4-byte time
+    usleep(5000);
+    close(fd);
+
+    // Output the response in hexadecimal for Python to capture
+    if (total_read > 0) {
+        for (int i = 0; i < total_read; i++) {
+            std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)response[i];
+        }
+        std::cout << std::endl;
     } else {
-        // Default behavior: output the interrogation frame
-        generate_interrogation_frame();
+        std::cerr << "No response received from sensor." << std::endl;
+        return 1;
     }
 
     return 0;
