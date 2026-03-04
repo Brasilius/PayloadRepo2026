@@ -67,6 +67,53 @@ def read_lora_data(process):
         elif data:
             print(f"[LoRa Thread] Unrecognized output: {data}")
 
+def transmit_lora_message(payload, executable_path="./lora_sender", port="/dev/ttyAML6"):
+    """
+    Executes the C++ LoRa sender program to transmit an integer via the RYLR998.
+    
+    Args:
+        payload (int or str): The integer value to transmit.
+        executable_path (str): The file path to the compiled C++ sender executable.
+        port (str): The serial port the RYLR998 is connected to.
+        
+    Returns:
+        bool: True if the transmission was successful and acknowledged, False otherwise.
+    """
+    try:
+        # Validate and convert the payload to a string format for command-line execution
+        payload_str = str(int(payload))
+        
+        # Execute the C++ compiled program
+        result = subprocess.run(
+            [executable_path, payload_str, port],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+
+        # Parse the standard output for the expected +OK acknowledgment from the module
+        output = result.stdout.strip()
+        
+        if "+OK" in output:
+            print(f"[LoRa TX] Successfully transmitted payload '{payload_str}' on {port}.")
+            return True
+        else:
+            print(f"[LoRa TX] Command executed, but unexpected response received: {output}")
+            if result.stderr:
+                print(f"[LoRa TX] Error details: {result.stderr.strip()}")
+            return False
+
+    except ValueError:
+        print("Error: The payload must be an integer or a string representing an integer.")
+        return False
+    except subprocess.CalledProcessError as e:
+        print(f"Subprocess failed with return code {e.returncode}")
+        print(f"Standard Error: {e.stderr.strip()}")
+        return False
+    except FileNotFoundError:
+        print(f"Error: The executable '{executable_path}' was not found. Please compile the C++ code.")
+        return False
+
 def main():
     print("Initializing system...")
     
