@@ -15,8 +15,8 @@ This is the Boomer Rocket Teams codebase for the Payload for the 2025-2026 NASA 
 ## Steps to Initiliaze
 
 Please ensure prior to initiating program to compile the c++ programs as such:
-g++ -o modbus_reader modbus.cpp
-g++ -o lora_reader recievermodule.cpp
+- g++ -o modbus_reader modbus.cpp
+- g++ -o lora_reader recievermodule.cpp
 
 before then initating the program using 
 
