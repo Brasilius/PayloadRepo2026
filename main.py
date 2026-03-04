@@ -2,9 +2,11 @@ import subprocess
 import threading
 import queue
 import time
+import sys
 
+# Global queue for thread-safe data transfer
 data_queue = queue.Queue()
-   
+
 def read_soil_conductivity(port="/dev/ttyUSB0", executable_path="./modbus_reader"): 
     """
     Executes the C++ Modbus reader program and parses the electrical conductivity.
@@ -18,7 +20,7 @@ def read_soil_conductivity(port="/dev/ttyUSB0", executable_path="./modbus_reader
             check=True
         )
 
-        # Remove any trailing newlines or whitespace
+        # Remove trailing whitespace
         hex_output = result.stdout.strip()
 
         if not hex_output:
@@ -36,7 +38,6 @@ def read_soil_conductivity(port="/dev/ttyUSB0", executable_path="./modbus_reader
         # Byte Count (chars 4-5)
         # Data (chars 6-9) -> Electrical Conductivity
         # CRC (chars 10-13)
-        
         data_hex = hex_output[6:10]
 
         # Convert the 2-byte hexadecimal data to a base-10 integer
@@ -49,45 +50,88 @@ def read_soil_conductivity(port="/dev/ttyUSB0", executable_path="./modbus_reader
         print(f"Standard Error: {e.stderr}")
         return None
     except FileNotFoundError:
-        print(f"Error: The executable '{executable_path}' was not found. Ensure it is compiled and the path is correct.")
+        print(f"Error: The executable '{executable_path}' was not found.")
         return None
 
-
+def read_lora_data(process):
+    """
+    Executes in a separate thread. Reads output from the C++ executable.
+    Transmits valid integers to the main thread via the queue.
+    """
+    for line in iter(process.stdout.readline, ''):
+        data = line.strip()
+        if data in ['1', '2', '3']:
+            print(f"[LoRa Thread] Valid integer received from /dev/ttyAML6: {data}")
+            # Insert data into the queue for the main thread to process
+            data_queue.put(data)
+        elif data:
+            print(f"[LoRa Thread] Unrecognized output: {data}")
 
 def main():
-  # Define the serial port and the path to your compiled C++ executable
-    sensor_port = "/dev/ttyUSB0"
-    reader_executable = "./modbus_reader"
+    print("Initializing system...")
     
-    print(f"Requesting data from {sensor_port}...")
-    
-    conductivity_value = read_soil_conductivity(
-        port=sensor_port, 
-        executable_path=reader_executable
-    )
-    
-    if conductivity_value is not None:
-        print(f"Electrical Conductivity: {conductivity_value}")
+    # 1. Initialize the continuous LoRa C++ subprocess
+    lora_executable = "./lora_reader"
+    try:
+        lora_process = subprocess.Popen(
+            [lora_executable],
+            stdout=subprocess.PIPE,
+            stderr=None, 
+            text=True,
+            bufsize=1
+        )
+    except FileNotFoundError:
+        print(f"Error: {lora_executable} not found. Ensure the C++ code is compiled.")
+        sys.exit(1)
 
-    """
-  Actually FUCK this main function
-    print("Hello from payloadrepo2026!")
-    
-    # Start the receiver thread
-    rx_thread = threading.Thread(target=reciever, daemon=True)
+    # 2. Start the LoRa receiver thread
+    rx_thread = threading.Thread(
+        target=read_lora_data, 
+        args=(lora_process,), 
+        daemon=True
+    )
     rx_thread.start()
     
-    while True: 
-        # Check if the C++ program passed data to the queue
-        try:
-            message = data_queue.get_nowait()
-            print(f"[Python Logic] Event Triggered: {message}")
-            # Insert additional handling logic here
-        except queue.Empty:
-            pass
+    print("Receiver thread active. Waiting for LoRa commands...")
+    
+    # 3. Main execution loop
+    try:
+        while True: 
+            # Check if the LoRa thread passed data to the queue
+            try:
+                message = data_queue.get_nowait()
+                print(f"[Main Logic] Event Initiated by Command: {message}")
+                
+                # Execute specific logic based on the received integer
+                if message == '1':
+                    print("Executing Command 1: Reading Soil Conductivity...")
+                    sensor_port = "/dev/ttyUSB0"
+                    reader_executable = "./modbus_reader"
+                    
+                    conductivity_value = read_soil_conductivity(
+                        port=sensor_port, 
+                        executable_path=reader_executable
+                    )
+                    
+                    if conductivity_value is not None:
+                        print(f"--> Electrical Conductivity Result: {conductivity_value}")
+                
+                elif message == '2':
+                    print("Executing Command 2: [Assign function here]")
+                    
+                elif message == '3':
+                    print("Executing Command 3: [Assign function here]")
+
+            except queue.Empty:
+                pass
+                
+            time.sleep(0.01) # Delay to prevent excessive CPU utilization
             
-        time.sleep(.01) # anti CPU death
-    """
+    except KeyboardInterrupt:
+        print("\nTermination signal received. Closing subprocess.")
+        lora_process.terminate()
+        lora_process.wait()
+        print("Process terminated.")
 
 if __name__ == "__main__":
     main()
