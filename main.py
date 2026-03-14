@@ -5,8 +5,8 @@ import time
 import sys
 
 # --- Configuration ---
-LORA_RECEIVER_EXEC = "./receiver_module"
-LORA_SENDER_EXEC = "./sender_module"
+LORA_RECEIVER_EXEC = "./receivermodule"
+LORA_SENDER_EXEC = "./transmittermodule"
 MODBUS_READER_EXEC = "./modbus_reader"
 
 LORA_PORT = "/dev/ttyAML6"
