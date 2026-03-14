@@ -17,7 +17,7 @@ int main(int argc, char *argv[]) {
     }
 
     std::string payload = argv[1];
-    const char *portname = (argc > 2) ? argv[2] : "/dev/ttyUSB0";
+    const char *portname = (argc > 2) ? argv[2] : "/dev/ttyAML6"; //fixed the fucking serial port again.
 
     // Open the serial port
     int fd = open(portname, O_RDWR | O_NOCTTY | O_SYNC);
