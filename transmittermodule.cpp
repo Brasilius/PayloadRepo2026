@@ -6,8 +6,8 @@
 #include <cstring>
 
 // Adjust this to match the LOCAL_ADDRESS of your ESP32 or receiving node.
-// Based on the provided .ino file, the ESP32 is address 2.
 #define TARGET_ADDRESS "2" 
+#define NETWORK_ID "5"
 
 int main(int argc, char *argv[]) {
     // Require at least the integer payload as an argument
@@ -34,7 +34,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // The .ino file uses 115200 baud for the LoRa module
+    // The RYLR998 uses 115200 baud
     cfsetospeed(&tty, B115200);
     cfsetispeed(&tty, B115200);
 
@@ -55,6 +55,18 @@ int main(int argc, char *argv[]) {
         close(fd);
         return 1;
     }
+
+    // --- NEW: Configure Network ID ---
+    std::string net_cmd = "AT+NETWORKID=" + std::string(NETWORK_ID) + "\r\n";
+    write(fd, net_cmd.c_str(), net_cmd.length());
+    
+    // 50ms delay to allow the module to process the network ID command
+    usleep(50000); 
+    
+    // Clear the +OK acknowledgment from the network ID command out of the buffer
+    char junk_buffer[256];
+    read(fd, junk_buffer, sizeof(junk_buffer));
+    // ----------------------------------
 
     // Construct the RYLR998 AT command
     // Format: AT+SEND=<Address>,<Payload Length>,<Payload>\r\n
