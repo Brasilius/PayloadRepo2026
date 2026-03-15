@@ -48,6 +48,9 @@ void setup() {
   // 5. Configure LoRa
   sendATCommand("AT"); 
   delay(500);
+
+  sendATCommand("AT+BAND=914500000"); //change band to 914.5 Mhz per NASA requirements
+  delay(500);
   
   String addressCmd = "AT+ADDRESS=" + String(LOCAL_ADDRESS);
   sendATCommand(addressCmd);

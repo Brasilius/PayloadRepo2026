@@ -79,6 +79,8 @@ int main() {
     usleep(500000);
     sendATCommand(serial_fd, "AT+NETWORKID=" + std::to_string(NETWORK_ID));
     usleep(500000);
+    sendATCommand(serial_fd, "AT+BAND=914500000"); 
+    usleep(500000);
 
     // Clear initial buffer setup responses
     while(true) {
