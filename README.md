@@ -3,9 +3,10 @@
 This is the Boomer Rocket Teams codebase for the Payload for the 2025-2026 NASA USLI Competition.🚀👨‍🚀
 
 ## Needed Hardware
-- Single Board Computer (in our case AML-s905x (or libreboard le potato))
+- Single Board Computer (in our case AML-S905X (or Libreboard Le Potato))
 - Soil Sensor from Temu
 - RYLR998 LoRa Transceiver
+- ESP-32 Dev Kit V1 (not strictly needed, but a form of micrcontroller with TXD, RXD, 3.3V, 5V and Ground pins of some sort)
 
 ## Needed Software
 - Astral UV https://docs.astral.sh/uv/
@@ -16,7 +17,8 @@ This is the Boomer Rocket Teams codebase for the Payload for the 2025-2026 NASA 
 
 Please ensure prior to initiating program to compile the c++ programs as such:
 - g++ -o modbus_reader modbus.cpp
-- g++ -o lora_reader recievermodule.cpp
+- g++ -o recievermodule recievermodule.cpp
+- g++ -o transmittermodule transmittermodule.cpp
 
 before then initating the program using 
 
