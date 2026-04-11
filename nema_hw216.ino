@@ -4,9 +4,9 @@
   Set MODE_STEPPER to true for a stepper using STEP/DIR, false for a DC motor using PWM/DIR.
 
   Wiring (ESP32 Dev Kit V1):
-  - PIN_STEP -> controller STEP pin (GPIO 26)
-  - PIN_DIR  -> controller DIR pin  (GPIO 27)
-  - PIN_SLP  -> controller SLP pin  (GPIO 25) — HIGH = awake, LOW = sleep
+  - PIN_STEP  -> controller STEP pin  (GPIO 26)
+  - PIN_DIR   -> controller DIR pin   (GPIO 27)
+  - SLP + RST -> VIN directly         — driver always awake/out-of-reset, no GPIO needed
 
   Pin selection rationale:
   - GPIO 6-11: reserved for flash SPI — never use
@@ -19,7 +19,6 @@ const bool MODE_STEPPER = true; // set to false for DC motor mode
 
 // Common pins
 const int PIN_DIR = 27;
-const int PIN_SLP = 25; // HIGH = awake, LOW = sleep
 
 // Stepper-specific
 const int PIN_STEP          = 26;
@@ -31,8 +30,6 @@ const int PIN_PWM = 26; // shared GPIO with STEP — swap wiring for DC mode
 
 void setup() {
   pinMode(PIN_DIR, OUTPUT);
-  pinMode(PIN_SLP, OUTPUT);
-  digitalWrite(PIN_SLP, HIGH); // wake the driver
 
   if (MODE_STEPPER) {
     pinMode(PIN_STEP, OUTPUT);
@@ -43,30 +40,52 @@ void setup() {
   }
 
   Serial.begin(115200);
-  Serial.println("nema_hw216: starting");
+  Serial.println("nema_hw216: waiting before test drive...");
+  delay(2000); // settle time before moving
+
+  Serial.println("nema_hw216: test drive starting");
+
+  // --- test drive: forward 600 ms, reverse 600 ms, then off ---
+  if (MODE_STEPPER) {
+    Serial.println("  forward 600 ms");
+    stepForMs(600, true);
+    Serial.println("  reverse 600 ms");
+    stepForMs(600, false);
+  } else {
+    Serial.println("  forward 600 ms");
+    digitalWrite(PIN_DIR, HIGH);
+    analogWrite(PIN_PWM, 255);
+    delay(600);
+    Serial.println("  reverse 600 ms");
+    digitalWrite(PIN_DIR, LOW);
+    analogWrite(PIN_PWM, 255);
+    delay(600);
+    analogWrite(PIN_PWM, 0);
+  }
+
+  Serial.println("nema_hw216: test drive complete");
 }
 
 void loop() {
-  if (MODE_STEPPER) {
-    stepMove(STEPS_PER_MOVE, true);
-    delay(500);
-    stepMove(STEPS_PER_MOVE, false);
-    delay(1000);
-  } else {
-    // Simple DC ramp test
-    digitalWrite(PIN_DIR, HIGH);
-    rampPWM(0, 255, 10);
-    delay(500);
-    digitalWrite(PIN_DIR, LOW);
-    rampPWM(255, 0, 10);
-    delay(1000);
-  }
+  // nothing — test drive runs once in setup()
 }
 
 // Stepping helper: toggles STEP pin 'steps' times
 void stepMove(int steps, bool direction) {
   digitalWrite(PIN_DIR, direction ? HIGH : LOW);
   for (int i = 0; i < steps; ++i) {
+    digitalWrite(PIN_STEP, HIGH);
+    delayMicroseconds(STEP_DELAY_US);
+    digitalWrite(PIN_STEP, LOW);
+    delayMicroseconds(STEP_DELAY_US);
+  }
+}
+
+// Step continuously in 'direction' for 'durationMs' milliseconds
+void stepForMs(unsigned long durationMs, bool direction) {
+  digitalWrite(PIN_DIR, direction ? HIGH : LOW);
+  unsigned long start = millis();
+  while (millis() - start < durationMs) {
     digitalWrite(PIN_STEP, HIGH);
     delayMicroseconds(STEP_DELAY_US);
     digitalWrite(PIN_STEP, LOW);
