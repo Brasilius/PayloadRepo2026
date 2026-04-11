@@ -99,6 +99,52 @@ The program will start the LoRa receiver in a background thread and wait for a c
 
 ---
 
+## Ground Station Dashboard (v2.6)
+
+A real-time Web UI for visualizing LoRa telemetry, NEMA stepper positioning, and high-precision soil conductivity data.
+
+### Features
+- **3D Drill Visualization:** Real-time NEMA motor positioning (steps) and rotation (RPM).
+- **Live Latency Charting:** Rolling history of LoRa signal pings.
+- **Soil Analysis:** High-precision readout for electrical conductivity (µS/cm).
+- **Hardware Simulator:** Built-in mock data generator for testing without physical sensors.
+
+### Initialization
+
+#### 1. Backend (Data Bridge)
+The backend pipes serial data to WebSockets.
+```bash
+cd dashboard/server
+npm install
+npm run dev      # Starts in SIMULATION mode (no hardware required)
+# OR
+npm start        # Starts in HARDWARE mode (expects /dev/ttyUSB0)
+```
+*Environment Variables:* `PORT` (default 3001), `SERIAL_PORT` (default /dev/ttyUSB0).
+
+#### 2. Frontend (Web UI)
+The dashboard is a React/Vite application.
+```bash
+cd dashboard/web
+npm install
+npm run dev
+```
+Open the provided URL (typically `http://localhost:5173`) in your browser.
+
+### Hardware JSON Format
+To pipe data from the Le Potato (or any serial source) into the dashboard, the serial output must be a single-line JSON string:
+```json
+{
+  "pingLatency": 25,
+  "motorRPM": 120.5,
+  "stepCount": 4500,
+  "soilConductivity": 1850.25,
+  "timestamp": "2026-04-11T12:00:00Z"
+}
+```
+
+---
+
 ## Component Details
 
 ### `basestation.ino` — Base Station (Board 2)
