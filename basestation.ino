@@ -162,8 +162,8 @@ void loop() {
       Serial.println("[LISTENER] Entering Telemetry Listener Mode...");
       Serial.println("           Type 'stop' at any time to exit.");
       Serial.println("----------------------------------------");
-      Serial.println("   LISTENING FOR SENSOR DATA FROM BOARD 3");
-      Serial.println("   Format: ALT (m) | PRES (Pa) | TEMP (C)");
+      Serial.println("   Board 3 -> ALT (m) | PRES (Pa) | TEMP (C)");
+      Serial.println("   Board 4 -> JSON telemetry (piped to dashboard)");
       Serial.println("----------------------------------------");
 
     } else if (input.length() > 0) {
@@ -184,8 +184,12 @@ void loop() {
 }
 
 // -----------------------------------------------------------------------
-// Parses incoming sensor packet from Board 3
-// Expected payload format: "ALT:xxx.xx,PRES:xxxxx.xx,TEMP:xx.xx"
+// Routes incoming LoRa packets by sender board.
+//
+// Board 3 → ALT/PRES/TEMP formatted telemetry for the Serial Monitor.
+// Board 4 → JSON telemetry relayed as a raw single line so server.js
+//            can JSON.parse() it and push it to the dashboard WebSocket.
+//
 // Full RCV format: +RCV=<SenderID>,<Len>,<Data>,<RSSI>,<SNR>
 // -----------------------------------------------------------------------
 void parseSensorPacket(String raw) {
@@ -207,6 +211,17 @@ void parseSensorPacket(String raw) {
   String rssi     = body.substring(secondLast + 1, lastComma);
   String snr      = body.substring(lastComma + 1);
 
+  // ── Board 4 (Le Potato) ──────────────────────────────────────────────
+  // Payload is a compact JSON string. Print it as a single line so the
+  // dashboard server (server.js) can call JSON.parse() on it directly.
+  // Any other Serial.print() here would corrupt the JSON line.
+  if (senderID == String(TARGET_ADDRESS_2)) {
+    Serial.println(payload);
+    return;
+  }
+
+  // ── Board 3 (Separator / Sensor) ─────────────────────────────────────
+  // Payload format: "ALT:xxx.xx,PRES:xxxxx.xx,TEMP:xx.xx"
   float altitude    = extractValue(payload, "ALT:");
   float pressure    = extractValue(payload, "PRES:");
   float temperature = extractValue(payload, "TEMP:");
