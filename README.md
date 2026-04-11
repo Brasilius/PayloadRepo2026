@@ -15,6 +15,7 @@ This system automates an in-field soil conductivity experiment deployed from a r
 1. Ground operator sends **Separation Command** (cmd `1`) → Board 3 fires the ematch to deploy the payload.
 2. Board 3 continuously streams **altimeter telemetry** (altitude, pressure, temperature) back to the base station.
 3. Once the payload lands, operator sends **Initialize Payload** (cmd `2`) → Board 4 (Le Potato) triggers the soil test sequence.
+4. The Le Potato drives the NEMA stepper **fully down then fully up** via the L298N motor controller, then reads soil **electrical conductivity** via Modbus RTU and transmits JSON telemetry back over LoRa **continuously**.
 4. The Le Potato reads soil **electrical conductivity** via Modbus RTU and transmits the results back over LoRa - 20 iterations total.
 
 ---
@@ -30,6 +31,14 @@ This system automates an in-field soil conductivity experiment deployed from a r
 | `modbus.cpp` | Le Potato - Board 4 | Reads soil electrical conductivity via Modbus RTU over serial |
 | `main.py` | Le Potato - Board 4 | Orchestrator: waits for initialize command, runs soil test sequence |
 | `nema_hw216.ino` | Standalone | NEMA motor driver test sketch for HW216 controller |
+| `basestation.ino` | ESP32 — Board 2 | Ground operator interface: sends commands, receives telemetry |
+| `payload-seperator.ino` | ESP32 — Board 3 | Fires ematch on separation command; streams altimeter telemetry |
+| `recievermodule.cpp` | Le Potato — Board 4 | LoRa receiver; outputs payload to stdout for Python |
+| `transmittermodule.cpp` | Le Potato — Board 4 | LoRa transmitter; sends JSON telemetry to base station |
+| `modbus.cpp` | Le Potato — Board 4 | Reads soil electrical conductivity via Modbus RTU over serial |
+| `nema_l298n.cpp` | Le Potato — Board 4 | NEMA stepper controller via L298N wired directly to Le Potato GPIO |
+| `main.py` | Le Potato — Board 4 | Orchestrator: waits for initialize command, deploys motor, reads soil |
+| `nema_hw216.ino` | Standalone | Legacy NEMA test sketch (HW216 on ESP32, not used in flight) |
 
 ---
 
@@ -49,8 +58,15 @@ This system automates an in-field soil conductivity experiment deployed from a r
 
 ### Payload SBC (Board 4)
 - AML-S905X (Libre Computer Le Potato) or equivalent SBC
-- RYLR998 LoRa Transceiver → `/dev/ttyAML6`
+- RYLR998 LoRa Transceiver → `/dev/ttyAML6` (UART_AO_B, physical pins 24/26)
 - Soil Sensor (Modbus RTU, 9600 baud) → `/dev/ttyUSB0`
+- L298N H-bridge motor controller wired directly to Le Potato GPIO (see `nema_l298n.cpp`):
+  - IN1 → physical pin 11 (GPIOX_6)
+  - IN2 → physical pin 13 (GPIOX_7)
+  - IN3 → physical pin 29 (GPIOX_4)
+  - IN4 → physical pin 31 (GPIOX_5)
+  - ENA / ENB → 5V (jumper, always enabled)
+  - VS → external 12V supply; GND shared with Le Potato
 
 ---
 
@@ -81,13 +97,25 @@ Both require the ESP32 board package installed in Arduino IDE.
 
 ### 2. Compile C++ Programs (Le Potato)
 
-On the Le Potato, compile all three C++ modules:
+On the Le Potato, compile all C++ modules:
 
 ```bash
-g++ -o modbus_reader modbus.cpp
-g++ -o receivermodule recievermodule.cpp
+g++ -o modbus_reader     modbus.cpp
+g++ -o receivermodule    recievermodule.cpp
 g++ -o transmittermodule transmittermodule.cpp
+g++ -o nema_l298n        nema_l298n.cpp
 ```
+
+> `nema_l298n` writes to `/sys/class/gpio` — run as root or add the user to the `gpio` group:
+> ```bash
+> sudo usermod -aG gpio $USER   # then log out and back in
+> ```
+> If the default `GPIOCHIP0_BASE` (410) does not match your kernel, find the correct value with:
+> ```bash
+> cat /sys/class/gpio/gpiochip*/base | sort -n
+> # Lowest number = gpiochip0 base (periphs-banks)
+> ```
+> Then update `GPIOCHIP0_BASE` at the top of `nema_l298n.cpp` and recompile.
 
 ### 3. Run the Payload Orchestrator
 
@@ -95,7 +123,53 @@ g++ -o transmittermodule transmittermodule.cpp
 uv run main.py
 ```
 
-The program will start the LoRa receiver in a background thread and wait for a command `2` from the base station to trigger the soil test sequence.
+The program starts the LoRa receiver in a background thread and waits for command `2` from the base station. On receipt it deploys the NEMA motor then begins continuous soil sensing.
+
+---
+
+## Ground Station Dashboard (v2.6)
+
+A real-time Web UI for visualizing LoRa telemetry, NEMA stepper positioning, and high-precision soil conductivity data.
+
+### Features
+- **3D Drill Visualization:** Real-time NEMA motor positioning (steps) and rotation (RPM).
+- **Live Latency Charting:** Rolling history of LoRa signal ping times.
+- **Soil Analysis:** High-precision readout for electrical conductivity (µS/cm).
+- **Hardware Simulator:** Built-in mock data generator for testing without physical sensors.
+
+### Initialization
+
+#### 1. Backend (Data Bridge)
+The backend pipes serial data to WebSockets.
+```bash
+cd dashboard/server
+npm install
+npm run dev      # Starts in SIMULATION mode (no hardware required)
+# OR
+npm start        # Starts in HARDWARE mode (reads JSON from serial port)
+```
+*Environment Variables:* `PORT` (default 3001), `SERIAL_PORT` (default `/dev/ttyUSB0`).
+
+#### 2. Frontend (Web UI)
+The dashboard is a React/Vite application.
+```bash
+cd dashboard/web
+npm install
+npm run dev
+```
+Open the provided URL (typically `http://localhost:5173`) in your browser.
+
+### Hardware JSON Format
+Each telemetry packet transmitted by `main.py` is a compact single-line JSON string. `server.js` reads it from the serial port, calls `JSON.parse()`, and forwards it to the React frontend via WebSocket:
+```json
+{
+  "pingLatency": 25,
+  "motorRPM": 150.0,
+  "stepCount": 8000,
+  "soilConductivity": 1850.25,
+  "timestamp": "2026-04-11T12:00:00.000000+00:00"
+}
+```
 
 ---
 
@@ -105,9 +179,9 @@ The program will start the LoRa receiver in a background thread and wait for a c
 
 Operator-facing Serial Monitor interface. On startup, presents a menu:
 
-- **`1`** - Sends separation command to Board 3 (fires ematch)
-- **`2`** - Sends initialize command to Board 4 (starts soil test on Le Potato)
-- **`3`** - Enters telemetry listener mode; streams live altitude/pressure/temperature from Board 3. Type `stop` to exit.
+- **`1`** — Sends separation command to Board 3 (fires ematch)
+- **`2`** — Sends initialize command to Board 4 (triggers deployment + soil sensing on Le Potato)
+- **`3`** — Enters telemetry listener mode; streams live altitude/pressure/temperature from Board 3. Type `stop` to exit.
 
 LoRa config: Address `2`, Network ID `5`, 914.5 MHz.
 
@@ -137,13 +211,13 @@ LoRa config: Address `4`, Network ID `5`, 914.5 MHz.
 
 ### `transmittermodule.cpp` - LoRa Transmitter (Le Potato, Board 4)
 
-Called by `main.py` as a subprocess. Takes an integer payload and port as arguments:
+Called by `main.py` as a subprocess. Accepts a payload string and optional port:
 
 ```bash
-./transmittermodule <value> [portname]
+./transmittermodule <payload_string> [portname]
 ```
 
-Sends the value to the base station (Address `2`) via `AT+SEND`. Returns `+OK` on success.
+Sends the payload to the base station (Address `2`) via `AT+SEND`. `main.py` passes a compact JSON string as the payload. Returns `+OK` on success.
 
 ---
 
@@ -155,25 +229,61 @@ Reads register `0x0015` (electrical conductivity) from a Modbus RTU soil sensor 
 ./modbus_reader [portname]
 ```
 
-Outputs the raw hex response to `stdout`. `main.py` extracts bytes `[6:10]` and converts to a decimal conductivity value.
+Outputs the raw hex response frame to `stdout`. `main.py` extracts bytes `[6:10]` and converts to a decimal conductivity value (µS/cm).
 
 ---
 
-### `main.py` - Payload Orchestrator (Le Potato, Board 4)
+### `nema_l298n.cpp` — NEMA Stepper Controller (Le Potato, Board 4)
+
+Drives a bipolar NEMA 17 stepper motor through an L298N dual H-bridge wired directly to the Le Potato GPIO header. No intermediate microcontroller — the Le Potato controls the motor itself via Linux sysfs GPIO.
+
+```bash
+./nema_l298n D   # full downward deployment
+./nema_l298n U   # full upward deployment
+```
+
+On completion, prints `DONE:<steps>:<elapsed_ms>` to `stdout`. `main.py` parses this to calculate and track `motorRPM` and `stepCount` for the telemetry payload.
+
+**Full-step sequence (4-phase, bipolar):**
+
+| Phase | IN1 | IN2 | IN3 | IN4 |
+|-------|-----|-----|-----|-----|
+| 0     | 1   | 0   | 1   | 0   |
+| 1     | 0   | 1   | 1   | 0   |
+| 2     | 0   | 1   | 0   | 1   |
+| 3     | 1   | 0   | 0   | 1   |
+
+Down = phases 0→1→2→3. Up = phases 3→2→1→0. Coils are de-energised after each move to prevent heat buildup.
+
+**GPIO pin mapping (Le Potato 40-pin header):**
+
+| L298N | Physical pin | GPIO    | gpiochip0 offset |
+|-------|-------------|---------|-----------------|
+| IN1   | 11          | GPIOX_6 | 52              |
+| IN2   | 13          | GPIOX_7 | 53              |
+| IN3   | 29          | GPIOX_4 | 50              |
+| IN4   | 31          | GPIOX_5 | 51              |
+
+These pins are in the GPIOX bank (`gpiochip0`) — entirely separate from the GPIOAO bank (`gpiochip1`) used by `/dev/ttyAML6` (UART_AO_B, physical 24/26). No conflict.
+
+---
+
+### `main.py` — Payload Orchestrator (Le Potato, Board 4)
 
 The top-level controller for the SBC:
 
-1. Launches `./receivermodule` as a persistent subprocess and monitors its output in a background thread.
-2. When the string `2` is received (Initialize Payload command from base station), triggers `execute_soil_test_sequence()`.
-3. The sequence runs 20 iterations: reads soil conductivity via `./modbus_reader`, then transmits the value via `./transmittermodule`. 1-second delay between iterations.
+1. Launches `./receivermodule` as a persistent subprocess and monitors its stdout in a background thread.
+2. When string `2` is received (Initialize Payload command from the base station), calls `execute_soil_test_sequence()`.
+3. The sequence:
+   - Invokes `./nema_l298n D` — blocks until the NEMA motor completes full downward deployment.
+   - Invokes `./nema_l298n U` — blocks until the NEMA motor completes full upward deployment.
+   - Enters a continuous loop: reads soil conductivity via `./modbus_reader`, builds a JSON telemetry packet, and transmits it via `./transmittermodule`. Repeats every second indefinitely.
+4. Each telemetry packet includes `pingLatency`, `motorRPM`, `stepCount`, `soilConductivity`, and `timestamp` — matching the hardware JSON format expected by the dashboard.
 
 ---
 
-### `nema_hw216.ino` - Motor Driver Test Sketch
+### `nema_hw216.ino` — Legacy Motor Test Sketch
 
-Standalone test sketch for a NEMA motor with an HW216-style controller. Supports two modes set via `MODE_STEPPER`:
+Standalone test sketch for a NEMA motor with an HW216-style STEP/DIR controller on an ESP32. **Not used in flight.** Retained for bench-testing motor mechanics independent of the payload stack.
 
-- **Stepper mode** (`true`): Uses STEP/DIR signals - runs 400 steps forward, pause, 400 steps back, repeat.
-- **DC mode** (`false`): Uses PWM/DIR signals - ramps up then down, repeat.
-
-Default pins: DIR → 4, STEP/PWM → 5, ENABLE → 6. Adjust `STEP_DELAY_US` and `STEPS_PER_MOVE` to tune speed and travel.
+Accepts serial commands (`D` = deploy down, `U` = deploy up) and responds with `DONE:<steps>:<elapsed_ms>`.
