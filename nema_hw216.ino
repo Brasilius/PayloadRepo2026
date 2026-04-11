@@ -5,19 +5,19 @@
   Wiring (ESP32 Dev Kit V1):
   - PIN_STEP  -> controller STEP pin  (GPIO 26)
   - PIN_DIR   -> controller DIR pin   (GPIO 27)
-  - SLP + RST -> VIN directly         — driver always awake/out-of-reset, no GPIO needed
+  - SLP + RST -> VIN directly         - driver always awake/out-of-reset, no GPIO needed
 
   Serial commands (115200 baud, sent from main.py):
-    'D'  — full downward deployment (DIR = HIGH)
-    'U'  — full upward deployment   (DIR = LOW)
+    'D'  - full downward deployment (DIR = HIGH)
+    'U'  - full upward deployment   (DIR = LOW)
 
   Response format on completion:
     DONE:<steps_executed>:<elapsed_ms>
 
   Pin selection rationale:
-  - GPIO 6-11: reserved for flash SPI — never use
-  - GPIO 0, 2, 12, 15: have boot-mode strapping requirements — avoided
-  - GPIO 34, 35, 36, 39: input-only — cannot drive outputs
+  - GPIO 6-11: reserved for flash SPI - never use
+  - GPIO 0, 2, 12, 15: have boot-mode strapping requirements - avoided
+  - GPIO 34, 35, 36, 39: input-only - cannot drive outputs
   - GPIO 25-27: clean general-purpose outputs with no boot-time concerns
 */
 

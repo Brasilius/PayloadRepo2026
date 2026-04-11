@@ -1,6 +1,6 @@
 /*
  * nema_l298n.cpp
- * NEMA bipolar stepper deployment controller — L298N H-bridge wired directly
+ * NEMA bipolar stepper deployment controller - L298N H-bridge wired directly
  * to the Libre Computer AML-S905X-CC (Le Potato) GPIO header.
  *
  * Build:
@@ -8,15 +8,15 @@
  *   (requires root or gpio group membership to write /sys/class/gpio)
  *
  * Usage:
- *   ./nema_l298n D          — full downward deployment
- *   ./nema_l298n U          — full upward deployment
+ *   ./nema_l298n D          - full downward deployment
+ *   ./nema_l298n U          - full upward deployment
  *
  * Stdout on success:
  *   DONE:<steps_executed>:<elapsed_ms>
  *   (parsed by main.py to update motorRPM and stepCount in the JSON payload)
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * WIRING — L298N ↔ Le Potato 40-pin header
+ * WIRING - L298N ↔ Le Potato 40-pin header
  * ─────────────────────────────────────────────────────────────────────────────
  *  L298N    │ 40-pin physical │ GPIO bank  │ gpiochip0 offset │ Function
  *  ─────────┼─────────────────┼────────────┼──────────────────┼──────────
@@ -24,16 +24,16 @@
  *  IN2      │ 13              │ GPIOX_7    │ 53               │ Coil A−
  *  IN3      │ 29              │ GPIOX_4    │ 50               │ Coil B+
  *  IN4      │ 31              │ GPIOX_5    │ 51               │ Coil B−
- *  ENA      │ jumper to 5V    │ —          │ —                │ Always enabled
- *  ENB      │ jumper to 5V    │ —          │ —                │ Always enabled
- *  VS (12V) │ external PSU    │ —          │ —                │ Motor power
- *  GND      │ any GND pin     │ —          │ —                │ Common ground
+ *  ENA      │ jumper to 5V    │ -          │ -                │ Always enabled
+ *  ENB      │ jumper to 5V    │ -          │ -                │ Always enabled
+ *  VS (12V) │ external PSU    │ -          │ -                │ Motor power
+ *  GND      │ any GND pin     │ -          │ -                │ Common ground
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * LoRa UART CONFLICT CHECK
  * ─────────────────────────────────────────────────────────────────────────────
  *  /dev/ttyAML6 = UART_AO_B → GPIOAO_4 (TX, phy 24) & GPIOAO_5 (RX, phy 26).
- *  GPIOAO is a separate bank exposed on gpiochip1 — entirely independent of
+ *  GPIOAO is a separate bank exposed on gpiochip1 - entirely independent of
  *  the GPIOX lines (gpiochip0 offsets 46-65) used here. No overlap. ✓
  *
  *  Other reserved pin ranges on the 40-pin header (also avoided):
@@ -92,7 +92,7 @@ static const int SEQ_LEN       = 4;
 // Full-step sequence for a bipolar NEMA stepper through an L298N dual H-bridge.
 // Rows: { IN1, IN2, IN3, IN4 }
 // IN1/IN2 drive coil A via H-bridge 1; IN3/IN4 drive coil B via H-bridge 2.
-// No row sets IN1=IN2=1 or IN3=IN4=1 simultaneously — no shoot-through risk.
+// No row sets IN1=IN2=1 or IN3=IN4=1 simultaneously - no shoot-through risk.
 static const int STEP_SEQ[SEQ_LEN][4] = {
     {1, 0, 1, 0},   // phase 0: A+, B+
     {0, 1, 1, 0},   // phase 1: A−, B+
@@ -119,7 +119,7 @@ static void gpio_write_file(const std::string& path, const std::string& value) {
 static void gpio_export(int gpio) {
     std::ofstream f("/sys/class/gpio/export");
     if (f.is_open()) {
-        f << gpio;  // Suppress error if already exported — kernel returns EBUSY
+        f << gpio;  // Suppress error if already exported - kernel returns EBUSY
     }
 }
 
@@ -187,8 +187,8 @@ static long step_motor(int steps, bool down) {
 int main(int argc, char* argv[]) {
     if (argc < 2 || (argv[1][0] != 'D' && argv[1][0] != 'U')) {
         std::cerr << "Usage: " << argv[0] << " <D|U>\n"
-                  << "  D — deploy downward (full travel)\n"
-                  << "  U — deploy upward   (full travel)\n";
+                  << "  D - deploy downward (full travel)\n"
+                  << "  U - deploy upward   (full travel)\n";
         return 1;
     }
 
@@ -214,7 +214,7 @@ int main(int argc, char* argv[]) {
     // De-energise coils and release GPIO before exit
     release_gpio();
 
-    // Report to main.py — format: DONE:<steps>:<elapsed_ms>
+    // Report to main.py - format: DONE:<steps>:<elapsed_ms>
     std::cout << "DONE:" << DEPLOY_STEPS << ":" << elapsed_ms << std::endl;
     return 0;
 }

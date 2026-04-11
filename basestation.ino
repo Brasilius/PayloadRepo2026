@@ -254,7 +254,7 @@ float extractValue(String payload, String key) {
 }
 
 // -----------------------------------------------------------------------
-// HELPER FUNCTION — used only during setup configuration
+// HELPER FUNCTION - used only during setup configuration
 // -----------------------------------------------------------------------
 void sendATCommand(String cmd) {
   LoRaSerial.println(cmd);

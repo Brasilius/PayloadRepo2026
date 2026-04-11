@@ -27,17 +27,10 @@ This system automates an in-field soil conductivity experiment deployed from a r
 | `basestation.ino` | ESP32 - Board 2 | Ground operator interface: sends commands, receives telemetry |
 | `payload-seperator.ino` | ESP32 - Board 3 | Fires ematch on separation command; streams altimeter telemetry |
 | `recievermodule.cpp` | Le Potato - Board 4 | LoRa receiver; outputs payload to stdout for Python |
-| `transmittermodule.cpp` | Le Potato - Board 4 | LoRa transmitter; sends soil conductivity readings to base |
+| `transmittermodule.cpp` | Le Potato - Board 4 | LoRa transmitter; sends JSON telemetry to base station |
 | `modbus.cpp` | Le Potato - Board 4 | Reads soil electrical conductivity via Modbus RTU over serial |
-| `main.py` | Le Potato - Board 4 | Orchestrator: waits for initialize command, runs soil test sequence |
-| `nema_hw216.ino` | Standalone | NEMA motor driver test sketch for HW216 controller |
-| `basestation.ino` | ESP32 — Board 2 | Ground operator interface: sends commands, receives telemetry |
-| `payload-seperator.ino` | ESP32 — Board 3 | Fires ematch on separation command; streams altimeter telemetry |
-| `recievermodule.cpp` | Le Potato — Board 4 | LoRa receiver; outputs payload to stdout for Python |
-| `transmittermodule.cpp` | Le Potato — Board 4 | LoRa transmitter; sends JSON telemetry to base station |
-| `modbus.cpp` | Le Potato — Board 4 | Reads soil electrical conductivity via Modbus RTU over serial |
-| `nema_l298n.cpp` | Le Potato — Board 4 | NEMA stepper controller via L298N wired directly to Le Potato GPIO |
-| `main.py` | Le Potato — Board 4 | Orchestrator: waits for initialize command, deploys motor, reads soil |
+| `nema_l298n.cpp` | Le Potato - Board 4 | NEMA stepper controller via L298N wired directly to Le Potato GPIO |
+| `main.py` | Le Potato - Board 4 | Orchestrator: waits for initialize command, deploys motor, reads soil |
 | `nema_hw216.ino` | Standalone | Legacy NEMA test sketch (HW216 on ESP32, not used in flight) |
 
 ---
@@ -106,7 +99,7 @@ g++ -o transmittermodule transmittermodule.cpp
 g++ -o nema_l298n        nema_l298n.cpp
 ```
 
-> `nema_l298n` writes to `/sys/class/gpio` — run as root or add the user to the `gpio` group:
+> `nema_l298n` writes to `/sys/class/gpio` - run as root or add the user to the `gpio` group:
 > ```bash
 > sudo usermod -aG gpio $USER   # then log out and back in
 > ```
@@ -179,9 +172,9 @@ Each telemetry packet transmitted by `main.py` is a compact single-line JSON str
 
 Operator-facing Serial Monitor interface. On startup, presents a menu:
 
-- **`1`** — Sends separation command to Board 3 (fires ematch)
-- **`2`** — Sends initialize command to Board 4 (triggers deployment + soil sensing on Le Potato)
-- **`3`** — Enters telemetry listener mode; streams live altitude/pressure/temperature from Board 3. Type `stop` to exit.
+- **`1`** - Sends separation command to Board 3 (fires ematch)
+- **`2`** - Sends initialize command to Board 4 (triggers deployment + soil sensing on Le Potato)
+- **`3`** - Enters telemetry listener mode; streams live altitude/pressure/temperature from Board 3. Type `stop` to exit.
 
 LoRa config: Address `2`, Network ID `5`, 914.5 MHz.
 
@@ -233,9 +226,9 @@ Outputs the raw hex response frame to `stdout`. `main.py` extracts bytes `[6:10]
 
 ---
 
-### `nema_l298n.cpp` — NEMA Stepper Controller (Le Potato, Board 4)
+### `nema_l298n.cpp` - NEMA Stepper Controller (Le Potato, Board 4)
 
-Drives a bipolar NEMA 17 stepper motor through an L298N dual H-bridge wired directly to the Le Potato GPIO header. No intermediate microcontroller — the Le Potato controls the motor itself via Linux sysfs GPIO.
+Drives a bipolar NEMA 17 stepper motor through an L298N dual H-bridge wired directly to the Le Potato GPIO header. No intermediate microcontroller - the Le Potato controls the motor itself via Linux sysfs GPIO.
 
 ```bash
 ./nema_l298n D   # full downward deployment
@@ -264,25 +257,25 @@ Down = phases 0→1→2→3. Up = phases 3→2→1→0. Coils are de-energised a
 | IN3   | 29          | GPIOX_4 | 50              |
 | IN4   | 31          | GPIOX_5 | 51              |
 
-These pins are in the GPIOX bank (`gpiochip0`) — entirely separate from the GPIOAO bank (`gpiochip1`) used by `/dev/ttyAML6` (UART_AO_B, physical 24/26). No conflict.
+These pins are in the GPIOX bank (`gpiochip0`) - entirely separate from the GPIOAO bank (`gpiochip1`) used by `/dev/ttyAML6` (UART_AO_B, physical 24/26). No conflict.
 
 ---
 
-### `main.py` — Payload Orchestrator (Le Potato, Board 4)
+### `main.py` - Payload Orchestrator (Le Potato, Board 4)
 
 The top-level controller for the SBC:
 
 1. Launches `./receivermodule` as a persistent subprocess and monitors its stdout in a background thread.
 2. When string `2` is received (Initialize Payload command from the base station), calls `execute_soil_test_sequence()`.
 3. The sequence:
-   - Invokes `./nema_l298n D` — blocks until the NEMA motor completes full downward deployment.
-   - Invokes `./nema_l298n U` — blocks until the NEMA motor completes full upward deployment.
+   - Invokes `./nema_l298n D` - blocks until the NEMA motor completes full downward deployment.
+   - Invokes `./nema_l298n U` - blocks until the NEMA motor completes full upward deployment.
    - Enters a continuous loop: reads soil conductivity via `./modbus_reader`, builds a JSON telemetry packet, and transmits it via `./transmittermodule`. Repeats every second indefinitely.
-4. Each telemetry packet includes `pingLatency`, `motorRPM`, `stepCount`, `soilConductivity`, and `timestamp` — matching the hardware JSON format expected by the dashboard.
+4. Each telemetry packet includes `pingLatency`, `motorRPM`, `stepCount`, `soilConductivity`, and `timestamp` - matching the hardware JSON format expected by the dashboard.
 
 ---
 
-### `nema_hw216.ino` — Legacy Motor Test Sketch
+### `nema_hw216.ino` - Legacy Motor Test Sketch
 
 Standalone test sketch for a NEMA motor with an HW216-style STEP/DIR controller on an ESP32. **Not used in flight.** Retained for bench-testing motor mechanics independent of the payload stack.
 

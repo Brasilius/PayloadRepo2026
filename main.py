@@ -20,7 +20,7 @@ SENSOR_PORT = "/dev/ttyUSB0"
 # for the webUI telemetry payload.
 STEPS_PER_REV = 200
 
-# --- Motor state — updated by deploy_nema() ---
+# --- Motor state - updated by deploy_nema() ---
 nema_step_count = 0
 motor_rpm       = 0.0
 
@@ -86,7 +86,7 @@ def deploy_nema(direction):
                 if elapsed_ms > 0:
                     revolutions = steps / STEPS_PER_REV
                     motor_rpm   = revolutions / (elapsed_ms / 60_000.0)
-                print(f"[NEMA] {label} complete — "
+                print(f"[NEMA] {label} complete - "
                       f"steps: {steps}, elapsed: {elapsed_ms} ms, RPM: {motor_rpm:.1f}")
         else:
             print(f"[NEMA] Unexpected output: {output!r}")
@@ -129,7 +129,7 @@ def read_soil_conductivity():
 
 
 # ---------------------------------------------------------------------------
-# Telemetry — JSON format required by the webUI dashboard
+# Telemetry - JSON format required by the webUI dashboard
 # ---------------------------------------------------------------------------
 
 def build_telemetry(conductivity, ping_ms):
@@ -138,10 +138,10 @@ def build_telemetry(conductivity, ping_ms):
     and rendered by the React dashboard (useSerialData.ts → TelemetryData):
 
       {
-        "pingLatency":      <int ms>          — LoRa transmit round-trip
-        "motorRPM":         <float>           — NEMA RPM during last deployment
-        "stepCount":        <int>             — cumulative NEMA steps
-        "soilConductivity": <float µS/cm>     — Modbus register 0x0015
+        "pingLatency":      <int ms>          - LoRa transmit round-trip
+        "motorRPM":         <float>           - NEMA RPM during last deployment
+        "stepCount":        <int>             - cumulative NEMA steps
+        "soilConductivity": <float µS/cm>     - Modbus register 0x0015
         "timestamp":        <ISO-8601 UTC>
       }
     """
@@ -179,7 +179,7 @@ def transmit_data(payload_dict):
         output  = result.stdout.strip()
 
         if "+OK" in output:
-            print(f"[TX] {len(payload_str)} B — "
+            print(f"[TX] {len(payload_str)} B - "
                   f"conductivity={payload_dict['soilConductivity']:.2f} µS/cm, "
                   f"ping={ping_ms} ms")
             return ping_ms
@@ -220,7 +220,7 @@ def execute_soil_test_sequence():
             payload = build_telemetry(conductivity, ping_ms)
             ping_ms = transmit_data(payload)
         else:
-            print("[Sequence] Modbus read failed — skipping transmission.")
+            print("[Sequence] Modbus read failed - skipping transmission.")
         time.sleep(1)
 
 
