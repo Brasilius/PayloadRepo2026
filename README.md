@@ -1,6 +1,6 @@
 # PayloadRepo2026
 
-Boomer Rocket Team's codebase for the Payload system — 2025-2026 NASA USLI Competition.
+Boomer Rocket Team's codebase for the Payload system - 2025-2026 NASA USLI Competition.
 
 ## System Overview
 
@@ -15,7 +15,7 @@ This system automates an in-field soil conductivity experiment deployed from a r
 1. Ground operator sends **Separation Command** (cmd `1`) → Board 3 fires the ematch to deploy the payload.
 2. Board 3 continuously streams **altimeter telemetry** (altitude, pressure, temperature) back to the base station.
 3. Once the payload lands, operator sends **Initialize Payload** (cmd `2`) → Board 4 (Le Potato) triggers the soil test sequence.
-4. The Le Potato reads soil **electrical conductivity** via Modbus RTU and transmits the results back over LoRa — 20 iterations total.
+4. The Le Potato reads soil **electrical conductivity** via Modbus RTU and transmits the results back over LoRa - 20 iterations total.
 
 ---
 
@@ -23,12 +23,12 @@ This system automates an in-field soil conductivity experiment deployed from a r
 
 | File | Node | Description |
 |---|---|---|
-| `basestation.ino` | ESP32 — Board 2 | Ground operator interface: sends commands, receives telemetry |
-| `payload-seperator.ino` | ESP32 — Board 3 | Fires ematch on separation command; streams altimeter telemetry |
-| `recievermodule.cpp` | Le Potato — Board 4 | LoRa receiver; outputs payload to stdout for Python |
-| `transmittermodule.cpp` | Le Potato — Board 4 | LoRa transmitter; sends soil conductivity readings to base |
-| `modbus.cpp` | Le Potato — Board 4 | Reads soil electrical conductivity via Modbus RTU over serial |
-| `main.py` | Le Potato — Board 4 | Orchestrator: waits for initialize command, runs soil test sequence |
+| `basestation.ino` | ESP32 - Board 2 | Ground operator interface: sends commands, receives telemetry |
+| `payload-seperator.ino` | ESP32 - Board 3 | Fires ematch on separation command; streams altimeter telemetry |
+| `recievermodule.cpp` | Le Potato - Board 4 | LoRa receiver; outputs payload to stdout for Python |
+| `transmittermodule.cpp` | Le Potato - Board 4 | LoRa transmitter; sends soil conductivity readings to base |
+| `modbus.cpp` | Le Potato - Board 4 | Reads soil electrical conductivity via Modbus RTU over serial |
+| `main.py` | Le Potato - Board 4 | Orchestrator: waits for initialize command, runs soil test sequence |
 | `nema_hw216.ino` | Standalone | NEMA motor driver test sketch for HW216 controller |
 
 ---
@@ -56,8 +56,8 @@ This system automates an in-field soil conductivity experiment deployed from a r
 
 ## Software Requirements
 
-- [Astral UV](https://docs.astral.sh/uv/) — Python package/runtime manager
-- `g++` — C++ compiler
+- [Astral UV](https://docs.astral.sh/uv/) - Python package/runtime manager
+- `g++` - C++ compiler
   ```
   sudo dnf install g++     # Fedora/RHEL
   sudo apt install g++     # Debian/Ubuntu
@@ -101,19 +101,19 @@ The program will start the LoRa receiver in a background thread and wait for a c
 
 ## Component Details
 
-### `basestation.ino` — Base Station (Board 2)
+### `basestation.ino` - Base Station (Board 2)
 
 Operator-facing Serial Monitor interface. On startup, presents a menu:
 
-- **`1`** — Sends separation command to Board 3 (fires ematch)
-- **`2`** — Sends initialize command to Board 4 (starts soil test on Le Potato)
-- **`3`** — Enters telemetry listener mode; streams live altitude/pressure/temperature from Board 3. Type `stop` to exit.
+- **`1`** - Sends separation command to Board 3 (fires ematch)
+- **`2`** - Sends initialize command to Board 4 (starts soil test on Le Potato)
+- **`3`** - Enters telemetry listener mode; streams live altitude/pressure/temperature from Board 3. Type `stop` to exit.
 
 LoRa config: Address `2`, Network ID `5`, 914.5 MHz.
 
 ---
 
-### `payload-seperator.ino` — Separator / Sensor Node (Board 3)
+### `payload-seperator.ino` - Separator / Sensor Node (Board 3)
 
 Dual-purpose node:
 
@@ -127,15 +127,15 @@ LoRa config: Address `3`, Network ID `5`, 914.5 MHz.
 
 ---
 
-### `recievermodule.cpp` — LoRa Receiver (Le Potato, Board 4)
+### `recievermodule.cpp` - LoRa Receiver (Le Potato, Board 4)
 
-Configures the RYLR998 on `/dev/ttyAML6` and enters a continuous receive loop. When a `+RCV=` packet arrives, it parses and prints only the payload string to `stdout` — consumed by `main.py` via subprocess pipe.
+Configures the RYLR998 on `/dev/ttyAML6` and enters a continuous receive loop. When a `+RCV=` packet arrives, it parses and prints only the payload string to `stdout` - consumed by `main.py` via subprocess pipe.
 
 LoRa config: Address `4`, Network ID `5`, 914.5 MHz.
 
 ---
 
-### `transmittermodule.cpp` — LoRa Transmitter (Le Potato, Board 4)
+### `transmittermodule.cpp` - LoRa Transmitter (Le Potato, Board 4)
 
 Called by `main.py` as a subprocess. Takes an integer payload and port as arguments:
 
@@ -147,7 +147,7 @@ Sends the value to the base station (Address `2`) via `AT+SEND`. Returns `+OK` o
 
 ---
 
-### `modbus.cpp` — Soil Sensor Reader (Le Potato, Board 4)
+### `modbus.cpp` - Soil Sensor Reader (Le Potato, Board 4)
 
 Reads register `0x0015` (electrical conductivity) from a Modbus RTU soil sensor at 9600 baud. Accepts a serial port as an argument (defaults to `/dev/ttyUSB0`):
 
@@ -159,7 +159,7 @@ Outputs the raw hex response to `stdout`. `main.py` extracts bytes `[6:10]` and 
 
 ---
 
-### `main.py` — Payload Orchestrator (Le Potato, Board 4)
+### `main.py` - Payload Orchestrator (Le Potato, Board 4)
 
 The top-level controller for the SBC:
 
@@ -169,11 +169,11 @@ The top-level controller for the SBC:
 
 ---
 
-### `nema_hw216.ino` — Motor Driver Test Sketch
+### `nema_hw216.ino` - Motor Driver Test Sketch
 
 Standalone test sketch for a NEMA motor with an HW216-style controller. Supports two modes set via `MODE_STEPPER`:
 
-- **Stepper mode** (`true`): Uses STEP/DIR signals — runs 400 steps forward, pause, 400 steps back, repeat.
-- **DC mode** (`false`): Uses PWM/DIR signals — ramps up then down, repeat.
+- **Stepper mode** (`true`): Uses STEP/DIR signals - runs 400 steps forward, pause, 400 steps back, repeat.
+- **DC mode** (`false`): Uses PWM/DIR signals - ramps up then down, repeat.
 
 Default pins: DIR → 4, STEP/PWM → 5, ENABLE → 6. Adjust `STEP_DELAY_US` and `STEPS_PER_MOVE` to tune speed and travel.
