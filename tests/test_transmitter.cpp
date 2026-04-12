@@ -19,9 +19,23 @@ void testFormatCommandLong() {
     std::cout << "testFormatCommandLong: PASSED" << std::endl;
 }
 
+void testFormatCommandEmptyTarget() {
+    std::string result = formatCommand("", "123");
+    assert(result == "AT+SEND=,3,123\r\n");
+    std::cout << "testFormatCommandEmptyTarget: PASSED" << std::endl;
+}
+
+void testFormatCommandEmptyPayload() {
+    std::string result = formatCommand("2", "");
+    assert(result == "AT+SEND=2,0,\r\n");
+    std::cout << "testFormatCommandEmptyPayload: PASSED" << std::endl;
+}
+
 int main() {
     testFormatCommand();
     testFormatCommandLong();
+    testFormatCommandEmptyTarget();
+    testFormatCommandEmptyPayload();
     std::cout << "All Transmitter logic tests PASSED!" << std::endl;
     return 0;
 }

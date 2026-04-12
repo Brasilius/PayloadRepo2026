@@ -33,9 +33,11 @@ void parseAndPrintDebug(std::string raw) {
   size_t secondLastComma = data.find_last_of(',', lastComma - 1);
   if (secondLastComma == std::string::npos) return;
 
-  std::string msgContent = data.substr(secondComma + 1, secondLastComma - secondComma - 1);
-  Serial.print("   [Content]: ");
-  Serial.println(msgContent);
+  if (secondLastComma > secondComma) {
+      std::string msgContent = data.substr(secondComma + 1, secondLastComma - secondComma - 1);
+      Serial.print("   [Content]: ");
+      Serial.println(msgContent);
+  }
 }
 
 void testParseDebug() {
@@ -57,9 +59,25 @@ void testParseDebugWithCommas() {
     std::cout << "testParseDebugWithCommas: PASSED" << std::endl;
 }
 
+void testParseDebugMalformedCommas() {
+    Serial.clear();
+    parseAndPrintDebug("+RCV=2,5");
+    assert(Serial.str() == "");
+    std::cout << "testParseDebugMalformedCommas: PASSED" << std::endl;
+}
+
+void testParseDebugEmpty() {
+    Serial.clear();
+    parseAndPrintDebug("");
+    assert(Serial.str() == "");
+    std::cout << "testParseDebugEmpty: PASSED" << std::endl;
+}
+
 int main() {
     testParseDebug();
     testParseDebugWithCommas();
+    testParseDebugMalformedCommas();
+    testParseDebugEmpty();
     std::cout << "All PayloadSeparator tests PASSED!" << std::endl;
     return 0;
 }

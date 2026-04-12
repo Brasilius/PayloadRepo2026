@@ -13,7 +13,7 @@ std::string extractPayload(const std::string& incoming) {
                 size_t second_comma = incoming.find(',', first_comma + 1);
                 if (second_comma != std::string::npos) {
                     size_t third_comma = incoming.find(',', second_comma + 1);
-                    if (third_comma != std::string::npos) {
+                    if (third_comma != std::string::npos && third_comma > second_comma) {
                         // Extract the payload located between the second and third commas
                         return incoming.substr(second_comma + 1, third_comma - second_comma - 1);
                     }
@@ -61,12 +61,24 @@ void testMalformedRCV() {
     std::cout << "testMalformedRCV: PASSED" << std::endl;
 }
 
+void testMalformedRCVNotEnoughCommas() {
+    assert(extractPayload("+RCV=4,5,HELLO") == "");
+    std::cout << "testMalformedRCVNotEnoughCommas: PASSED" << std::endl;
+}
+
+void testMalformedRCVConsecutiveCommas() {
+    assert(extractPayload("+RCV=4,5,,-50,10") == "");
+    std::cout << "testMalformedRCVConsecutiveCommas: PASSED" << std::endl;
+}
+
 int main() {
     testBasicPayload();
     testPayloadWithCommas();
     testEmptyInput();
     testInvalidPrefix();
     testMalformedRCV();
+    testMalformedRCVNotEnoughCommas();
+    testMalformedRCVConsecutiveCommas();
     std::cout << "All ReceiverModule tests PASSED!" << std::endl;
     return 0;
 }
