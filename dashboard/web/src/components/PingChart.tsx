@@ -37,13 +37,13 @@ const PingChart: React.FC<PingChartProps> = ({ history }) => {
           />
           <Tooltip 
             contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px' }}
-            itemStyle={{ color: '#38bdf8' }}
+            itemStyle={{ color: '#ec4899' }}
             labelClassName="hidden"
           />
           <Line 
             type="monotone" 
             dataKey="pingLatency" 
-            stroke="#38bdf8" 
+            stroke="#ec4899" 
             strokeWidth={2} 
             dot={false}
             isAnimationActive={false}

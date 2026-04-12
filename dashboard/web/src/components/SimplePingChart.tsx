@@ -36,7 +36,7 @@ const SimplePingChart: React.FC<SimplePingChartProps> = ({ history }) => {
         <h3 className="text-slate-400 text-xs font-semibold uppercase tracking-wider">
           Signal Latency
         </h3>
-        <span className="text-sky-400 font-mono text-lg font-bold">
+        <span className="text-pink-400 font-mono text-lg font-bold">
           {latestPing}ms
         </span>
       </div>
@@ -54,7 +54,7 @@ const SimplePingChart: React.FC<SimplePingChartProps> = ({ history }) => {
           {/* The Line */}
           <polyline
             fill="none"
-            stroke="#38bdf8"
+            stroke="#ec4899"
             strokeWidth="3"
             strokeLinejoin="round"
             points={points}
@@ -71,7 +71,7 @@ const SimplePingChart: React.FC<SimplePingChartProps> = ({ history }) => {
 
           <defs>
             <linearGradient id="gradient" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="#38bdf8" />
+              <stop offset="0%" stopColor="#ec4899" />
               <stop offset="100%" stopColor="transparent" />
             </linearGradient>
           </defs>

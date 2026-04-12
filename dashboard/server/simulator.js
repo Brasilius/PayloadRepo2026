@@ -11,10 +11,9 @@ function startSimulator(io) {
     // Simulate Jittery RPM
     rpm = 120 + (Math.random() - 0.5) * 5;
 
-    // Simulate 3-5 digit Soil Conductivity with fractions
-    // e.g., 123.45 to 12345.67
-    const baseConductivity = 1500.00;
-    const conductivity = baseConductivity + (Math.random() * 500);
+    // Simulate soil conductivity within 0-1500 µS/cm range
+    const baseConductivity = 750.00;
+    const conductivity = Math.min(1500, Math.max(0, baseConductivity + (Math.random() - 0.5) * 600));
 
     const data = {
       pingLatency: Math.floor(Math.random() * 30) + 15,

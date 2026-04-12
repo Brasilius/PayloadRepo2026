@@ -37,7 +37,7 @@ const DrillModel: React.FC<DrillModelProps> = ({ rpm, steps }) => {
       {[0, 1, 2, 3].map((i) => (
         <mesh key={i} position={[0, -0.5 + i * 0.4, 0]} rotation={[0.5, 0, 0]} castShadow>
           <torusGeometry args={[0.42, 0.04, 16, 32]} />
-          <meshStandardMaterial color="#38bdf8" metalness={0.5} roughness={0.5} />
+          <meshStandardMaterial color="#ec4899" metalness={0.5} roughness={0.5} />
         </mesh>
       ))}
     </group>
@@ -57,10 +57,10 @@ const DrillGraphic: React.FC<DrillGraphicProps> = ({ rpm, steps }) => {
           NEMA Stepper Array
         </h3>
         <div className="space-y-1">
-          <p className="text-3xl font-mono text-sky-400 font-bold">
+          <p className="text-3xl font-mono text-pink-400 font-bold">
             {rpm.toFixed(1)} <span className="text-xs text-slate-500 uppercase">RPM</span>
           </p>
-          <p className="text-3xl font-mono text-emerald-400 font-bold">
+          <p className="text-3xl font-mono text-pink-400 font-bold">
             {steps.toLocaleString()} <span className="text-xs text-slate-500 uppercase">Steps</span>
           </p>
         </div>
@@ -71,7 +71,7 @@ const DrillGraphic: React.FC<DrillGraphicProps> = ({ rpm, steps }) => {
         <OrbitControls enableZoom={true} autoRotate={false} />
         <ambientLight intensity={1.5} />
         <pointLight position={[10, 10, 10]} intensity={2} castShadow />
-        <directionalLight position={[-5, 5, 5]} intensity={1.5} color="#38bdf8" />
+        <directionalLight position={[-5, 5, 5]} intensity={1.5} color="#ec4899" />
         <spotLight position={[0, 10, 0]} angle={0.3} penumbra={1} intensity={2} castShadow />
 
         <Grid
