@@ -120,6 +120,37 @@ The program starts the LoRa receiver in a background thread and waits for comman
 
 ---
 
+## Docker Usage
+
+A `Dockerfile` is provided to run the Payload SBC environment (Le Potato) within a Fedora 42 container. This ensures all C++ modules are compiled and Python dependencies are managed consistently.
+
+### 1. Build the Image
+From the repository root:
+```bash
+docker build -t payload-repo .
+```
+
+### 2. Run the Container
+The orchestrator requires access to hardware serial ports and GPIO. Run the container with `--privileged` or map the specific devices and sysfs paths:
+
+```bash
+# Recommended for hardware access
+docker run --privileged -it payload-repo
+```
+
+Alternatively, map specific devices:
+```bash
+docker run -it \
+  --device /dev/ttyAML6:/dev/ttyAML6 \
+  --device /dev/ttyUSB0:/dev/ttyUSB0 \
+  -v /sys:/sys \
+  payload-repo
+```
+
+*Note: The default container command is `uv run main.py`. To access the dashboard or run individual modules, use `docker run -it payload-repo /bin/bash`.*
+
+---
+
 ## Ground Station Dashboard (v2.6)
 
 A real-time Web UI for visualizing LoRa telemetry, NEMA stepper positioning, and high-precision soil conductivity data.
