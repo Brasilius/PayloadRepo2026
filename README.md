@@ -130,7 +130,7 @@ From the repository root:
 docker build -t payload-repo .
 ```
 
-### 2. Run the Container
+### 2. Run the Orchestrator (Hardware Mode)
 The orchestrator requires access to hardware serial ports and GPIO. Run the container with `--privileged` or map the specific devices and sysfs paths:
 
 ```bash
@@ -146,6 +146,24 @@ docker run -it \
   -v /sys:/sys \
   payload-repo
 ```
+
+### 3. Run the Dashboard (Simulation Mode)
+To run the dashboard and its server within the container, expose the necessary ports (3001 for server, 5173 for web):
+
+```bash
+docker run -p 3001:3001 -p 5173:5173 -it payload-repo /bin/bash
+```
+
+Inside the container shell, start both the backend (with simulation) and the frontend:
+```bash
+# Start backend in simulation mode
+npm --prefix dashboard/server run dev &
+
+# Start frontend (must listen on 0.0.0.0 for host access)
+npm --prefix dashboard/web run dev -- --host
+```
+
+Then visit `http://localhost:5173` on your host machine.
 
 *Note: The default container command is `uv run main.py`. To access the dashboard or run individual modules, use `docker run -it payload-repo /bin/bash`.*
 

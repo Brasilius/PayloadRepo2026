@@ -42,6 +42,9 @@ RUN npm install && npm run build
 # Return to root app directory
 WORKDIR /app
 
+# Expose ports for Dashboard Server (3001) and Web UI (5173)
+EXPOSE 3001 5173
+
 # The main program requires access to /dev/ttyAML6 and /sys/class/gpio.
 # These must be mapped at runtime (e.g., --privileged or --device).
 # Default command runs the main orchestrator.
