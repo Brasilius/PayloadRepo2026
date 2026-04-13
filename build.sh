@@ -5,8 +5,8 @@
 
 set -e
 
-BUILD_DIR="build"
-TESTS_OUT_DIR="$BUILD_DIR/tests"
+BUILD_DIR="."
+TESTS_OUT_DIR="build/tests"
 CXX="${CXX:-g++}"
 CXXFLAGS="-std=c++17 -Wall -Wextra -O2"
 
@@ -14,7 +14,7 @@ CXXFLAGS="-std=c++17 -Wall -Wextra -O2"
 MAIN_SOURCES=(
     "modbus.cpp:modbus"
     "transmittermodule.cpp:transmittermodule"
-    "recievermodule.cpp:recievermodule"
+    "recievermodule.cpp:receivermodule"
     "nema_l298n.cpp:nema_l298n"
 )
 
@@ -31,14 +31,18 @@ TEST_SOURCES=(
 
 # ── Clean ─────────────────────────────────────────────────────────────────────
 if [[ "${1}" == "clean" ]]; then
-    echo "Cleaning build directory..."
-    rm -rf "$BUILD_DIR"
+    echo "Cleaning built binaries..."
+    for entry in "${MAIN_SOURCES[@]}"; do
+        bin="./${entry##*:}"
+        [[ -f "$bin" ]] && rm -f "$bin" && echo "  removed $bin"
+    done
+    rm -rf "build/tests"
     echo "Done."
     exit 0
 fi
 
 # ── Prepare output dirs ───────────────────────────────────────────────────────
-mkdir -p "$BUILD_DIR" "$TESTS_OUT_DIR"
+mkdir -p "$TESTS_OUT_DIR"
 
 echo "Compiler : $CXX"
 echo "Flags    : $CXXFLAGS"
@@ -63,7 +67,7 @@ echo ""
 echo "=== Building tests ==="
 for entry in "${TEST_SOURCES[@]}"; do
     src="${entry%%:*}"
-    out="$BUILD_DIR/${entry##*:}"
+    out="$TESTS_OUT_DIR/$(basename ${entry##*:})"
     printf "  %-40s -> %s\n" "$src" "$out"
     if $CXX $CXXFLAGS "$src" -o "$out" 2>&1; then
         :
@@ -83,6 +87,6 @@ else
     echo "All targets built successfully."
     echo ""
     echo "Binaries written to:"
-    echo "  $BUILD_DIR/             (main modules)"
-    echo "  $BUILD_DIR/tests/       (test binaries)"
+    echo "  ./                      (main modules)"
+    echo "  $TESTS_OUT_DIR/         (test binaries)"
 fi
