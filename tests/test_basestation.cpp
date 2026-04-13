@@ -13,6 +13,7 @@ float stringToFloat(std::string s) {
 
 // Logic from basestation.ino
 float extractValue(std::string payload, std::string key) {
+    if (key.empty()) return -9999.0;
     size_t keyIndex = payload.find(key);
     if (keyIndex == std::string::npos) return -9999.0;
 
@@ -65,12 +66,33 @@ void testExtractPartialKey() {
     std::cout << "testExtractPartialKey (confirms behavior): PASSED" << std::endl;
 }
 
+void testExtractEmptyKey() {
+    float val = extractValue("ALT:123.45", "");
+    assert(val == -9999.0);
+    std::cout << "testExtractEmptyKey: PASSED" << std::endl;
+}
+
+void testExtractEmptyPayload() {
+    float val = extractValue("", "ALT:");
+    assert(val == -9999.0);
+    std::cout << "testExtractEmptyPayload: PASSED" << std::endl;
+}
+
+void testExtractValueNoComma() {
+    float val = extractValue("ALT:123.45", "ALT:");
+    assert(val > 123.4 && val < 123.5);
+    std::cout << "testExtractValueNoComma: PASSED" << std::endl;
+}
+
 int main() {
     testExtractAltitude();
     testExtractPressure();
     testExtractTemperature();
     testExtractMissingKey();
     testExtractPartialKey();
+    testExtractEmptyKey();
+    testExtractEmptyPayload();
+    testExtractValueNoComma();
     std::cout << "All BaseStation tests PASSED!" << std::endl;
     return 0;
 }

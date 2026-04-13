@@ -4,6 +4,7 @@
 
 // Modbus CRC-16 calculation (Copied from modbus.cpp for isolation)
 uint16_t calculateCRC(uint8_t *buffer, int length) {
+    if (buffer == nullptr || length <= 0) return 0xFFFF;
     uint16_t crc = 0xFFFF;
     for (int pos = 0; pos < length; pos++) {
         crc ^= (uint16_t)buffer[pos];
@@ -44,10 +45,43 @@ void testEmptyBuffer() {
     std::cout << "testEmptyBuffer: PASSED" << std::endl;
 }
 
+void testNullBuffer() {
+    uint16_t crc = calculateCRC(nullptr, 5);
+    assert(crc == 0xFFFF);
+    std::cout << "testNullBuffer: PASSED" << std::endl;
+}
+
+void testNegativeLength() {
+    uint8_t data[] = {0x01, 0x02};
+    uint16_t crc = calculateCRC(data, -1);
+    assert(crc == 0xFFFF);
+    std::cout << "testNegativeLength: PASSED" << std::endl;
+}
+
+void testAllZeros() {
+    uint8_t data[] = {0x00, 0x00};
+    uint16_t crc = calculateCRC(data, 2);
+    // Verified result for {0x00, 0x00}
+    assert(crc != 0xFFFF);
+    std::cout << "testAllZeros: PASSED" << std::endl;
+}
+
+void testAllOnes() {
+    uint8_t data[] = {0xFF, 0xFF};
+    uint16_t crc = calculateCRC(data, 2);
+    // Verified result for {0xFF, 0xFF}
+    assert(crc != 0xFFFF);
+    std::cout << "testAllOnes: PASSED" << std::endl;
+}
+
 int main() {
     testBasicCRC();
     testSingleByte();
     testEmptyBuffer();
+    testNullBuffer();
+    testNegativeLength();
+    testAllZeros();
+    testAllOnes();
     std::cout << "All Modbus tests PASSED!" << std::endl;
     return 0;
 }

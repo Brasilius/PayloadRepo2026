@@ -57,9 +57,34 @@ void testRampDown() {
     std::cout << "testRampDown: PASSED" << std::endl;
 }
 
+void testRampEqualStartEnd() {
+    pwm_writes.clear();
+    _millis = 0;
+    rampPWM(10, 10, 10);
+    // Expected values: 10
+    assert(pwm_writes.size() == 1);
+    assert(pwm_writes[0].val == 10);
+    assert(_millis == 10);
+    std::cout << "testRampEqualStartEnd: PASSED" << std::endl;
+}
+
+void testRampNegativeSteps() {
+    pwm_writes.clear();
+    _millis = 0;
+    rampPWM(-20, -10, 10);
+    // Expected values: -20, -15, -10
+    assert(pwm_writes.size() == 3);
+    assert(pwm_writes[0].val == -20);
+    assert(pwm_writes[2].val == -10);
+    assert(_millis == 30);
+    std::cout << "testRampNegativeSteps: PASSED" << std::endl;
+}
+
 int main() {
     testRampUp();
     testRampDown();
+    testRampEqualStartEnd();
+    testRampNegativeSteps();
     std::cout << "All Stepper logic tests PASSED!" << std::endl;
     return 0;
 }
