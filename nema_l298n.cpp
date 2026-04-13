@@ -1,15 +1,19 @@
 /*
  * nema_l298n.cpp
- * NEMA bipolar stepper deployment controller - L298N H-bridge wired directly
+ * NEMA 17 bipolar stepper deployment controller - L298N H-bridge wired directly
  * to the Libre Computer AML-S905X-CC (Le Potato) GPIO header.
+ *
+ * Step sequencing follows the Arduino Stepper library convention for a 4-wire
+ * bipolar motor driven via L298N dual H-bridge (IN1, IN2, IN3, IN4 ordering).
+ * Speed is set in RPM - matching setSpeed() from the Arduino Stepper library.
  *
  * Build:
  *   g++ nema_l298n.cpp -o nema_l298n
  *   (requires root or gpio group membership to write /sys/class/gpio)
  *
  * Usage:
- *   ./nema_l298n D          - full downward deployment
- *   ./nema_l298n U          - full upward deployment
+ *   ./nema_l298n D [rpm]    - full downward deployment (default 60 RPM)
+ *   ./nema_l298n U [rpm]    - full upward deployment   (default 60 RPM)
  *
  * Stdout on success:
  *   DONE:<steps_executed>:<elapsed_ms>
@@ -62,6 +66,7 @@
 #include <unistd.h>     // usleep
 #include <chrono>
 #include <stdexcept>
+#include <cstdlib>      // std::stoi
 
 // ---------------------------------------------------------------------------
 // GPIO numbering
@@ -85,9 +90,20 @@ static const int GPIO_IN4 = GPIOCHIP0_BASE + GPIOX_BASE + 5;  // GPIOX_5, phy 31
 // Motor parameters
 // ---------------------------------------------------------------------------
 
+// NEMA 17: 200 full steps per revolution (1.8° per step).
+static const int STEPS_PER_REV = 200;
+
 static const int DEPLOY_STEPS  = 4000;   // Full travel distance (tune to mechanism)
-static const int STEP_DELAY_US = 2000;   // µs between phase changes; 2000 ≈ 150 RPM
+static const int DEFAULT_RPM   = 60;     // Matches Arduino Stepper setSpeed(60)
 static const int SEQ_LEN       = 4;
+
+// Compute the inter-step delay in microseconds from a target RPM.
+// Mirrors the timing used by the Arduino Stepper library:
+//   delay_us = 60,000,000 / (rpm * steps_per_rev)
+static int rpm_to_step_delay_us(int rpm) {
+    if (rpm <= 0) rpm = DEFAULT_RPM;
+    return 60000000 / (rpm * STEPS_PER_REV);
+}
 
 // Full-step sequence for a bipolar NEMA stepper through an L298N dual H-bridge.
 // Rows: { IN1, IN2, IN3, IN4 }
@@ -162,10 +178,10 @@ static void release_gpio() {
     gpio_unexport(GPIO_IN4);
 }
 
-// Execute 'steps' full-steps.
+// Execute 'steps' full-steps at the given inter-step delay.
 // down = true  → forward sequence (0→1→2→3→…) = downward deployment
 // down = false → reverse sequence (3→2→1→0→…) = upward deployment
-static long step_motor(int steps, bool down) {
+static long step_motor(int steps, bool down, int step_delay_us) {
     auto t0 = std::chrono::steady_clock::now();
 
     for (int i = 0; i < steps; ++i) {
@@ -173,7 +189,7 @@ static long step_motor(int steps, bool down) {
                          : ((SEQ_LEN - 1) - (i % SEQ_LEN));
         set_phase(STEP_SEQ[phase][0], STEP_SEQ[phase][1],
                   STEP_SEQ[phase][2], STEP_SEQ[phase][3]);
-        usleep(STEP_DELAY_US);
+        usleep(step_delay_us);
     }
 
     auto t1 = std::chrono::steady_clock::now();
@@ -186,13 +202,16 @@ static long step_motor(int steps, bool down) {
 
 int main(int argc, char* argv[]) {
     if (argc < 2 || (argv[1][0] != 'D' && argv[1][0] != 'U')) {
-        std::cerr << "Usage: " << argv[0] << " <D|U>\n"
-                  << "  D - deploy downward (full travel)\n"
-                  << "  U - deploy upward   (full travel)\n";
+        std::cerr << "Usage: " << argv[0] << " <D|U> [rpm]\n"
+                  << "  D      - deploy downward (full travel)\n"
+                  << "  U      - deploy upward   (full travel)\n"
+                  << "  rpm    - motor speed in RPM (default: " << DEFAULT_RPM << ")\n";
         return 1;
     }
 
     bool down = (argv[1][0] == 'D');
+    int  rpm  = (argc >= 3) ? std::stoi(argv[2]) : DEFAULT_RPM;
+    int  step_delay_us = rpm_to_step_delay_us(rpm);
 
     // Export and configure all four control pins
     const int pins[] = {GPIO_IN1, GPIO_IN2, GPIO_IN3, GPIO_IN4};
@@ -208,8 +227,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Execute the deployment move
-    long elapsed_ms = step_motor(DEPLOY_STEPS, down);
+    // Execute the deployment move at the requested RPM
+    long elapsed_ms = step_motor(DEPLOY_STEPS, down, step_delay_us);
 
     // De-energise coils and release GPIO before exit
     release_gpio();
