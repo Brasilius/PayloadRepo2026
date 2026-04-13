@@ -233,7 +233,7 @@ def main():
 
     try:
         receiver_process = subprocess.Popen(
-            [LORA_RECEIVER_EXEC],
+            [LORA_RECEIVER_EXEC, LORA_PORT],
             stdout=subprocess.PIPE,
             stderr=None,
             text=True,

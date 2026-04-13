@@ -13,8 +13,8 @@
 // --- CONFIGURATION ---
 const int LOCAL_ADDRESS = 4;
 const int NETWORK_ID = 5;
-// Update this path based on your specific UART configuration on the Le Potato
-const char* SERIAL_PORT = "/dev/ttyAML6"; 
+// Default port for Le Potato (AML-S905X). Override with argv[1] on other machines.
+const char* DEFAULT_SERIAL_PORT = "/dev/ttyAML6";
 
 // --- HELPER FUNCTIONS ---
 void sendATCommand(int fd, const std::string& cmd) {
@@ -33,7 +33,9 @@ std::string readLine(int fd) {
     return result;
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    const char* SERIAL_PORT = (argc > 1) ? argv[1] : DEFAULT_SERIAL_PORT;
+
     // 1. Open Serial Port
     int serial_fd = open(SERIAL_PORT, O_RDWR | O_NOCTTY | O_SYNC);
     if (serial_fd < 0) {
