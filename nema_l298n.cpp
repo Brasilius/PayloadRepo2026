@@ -24,14 +24,17 @@
  * ─────────────────────────────────────────────────────────────────────────────
  *  L298N    │ 40-pin physical │ GPIO bank  │ gpiochip0 offset │ Function
  *  ─────────┼─────────────────┼────────────┼──────────────────┼──────────
- *  IN1      │ 11              │ GPIOX_6    │ 52               │ Coil A+
- *  IN2      │ 13              │ GPIOX_7    │ 53               │ Coil A−
- *  IN3      │ 29              │ GPIOX_4    │ 50               │ Coil B+
- *  IN4      │ 31              │ GPIOX_5    │ 51               │ Coil B−
+ *  IN1      │  7              │ GPIOX_6    │ 52               │ Coil A+
+ *  IN2      │ 11              │ GPIOX_17   │ 63               │ Coil A−
+ *  IN3      │ 13              │ GPIOX_18   │ 64               │ Coil B+
+ *  IN4      │ 15              │ GPIOX_19   │ 65               │ Coil B−
  *  ENA      │ jumper to 5V    │ -          │ -                │ Always enabled
  *  ENB      │ jumper to 5V    │ -          │ -                │ Always enabled
  *  VS (12V) │ external PSU    │ -          │ -                │ Motor power
  *  GND      │ any GND pin     │ -          │ -                │ Common ground
+ *
+ *  Verify offsets on target board:
+ *    gpioinfo gpiochip0 | grep -E "line (52|63|64|65)"
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * LoRa UART CONFLICT CHECK
@@ -81,10 +84,10 @@ static const int GPIOCHIP0_BASE = 410;
 static const int GPIOX_BASE = 46;
 
 // sysfs GPIO numbers for the four L298N control pins
-static const int GPIO_IN1 = GPIOCHIP0_BASE + GPIOX_BASE + 6;  // GPIOX_6, phy 11
-static const int GPIO_IN2 = GPIOCHIP0_BASE + GPIOX_BASE + 7;  // GPIOX_7, phy 13
-static const int GPIO_IN3 = GPIOCHIP0_BASE + GPIOX_BASE + 4;  // GPIOX_4, phy 29
-static const int GPIO_IN4 = GPIOCHIP0_BASE + GPIOX_BASE + 5;  // GPIOX_5, phy 31
+static const int GPIO_IN1 = GPIOCHIP0_BASE + GPIOX_BASE + 6;   // GPIOX_6,  phy  7
+static const int GPIO_IN2 = GPIOCHIP0_BASE + GPIOX_BASE + 17;  // GPIOX_17, phy 11
+static const int GPIO_IN3 = GPIOCHIP0_BASE + GPIOX_BASE + 18;  // GPIOX_18, phy 13
+static const int GPIO_IN4 = GPIOCHIP0_BASE + GPIOX_BASE + 19;  // GPIOX_19, phy 15
 
 // ---------------------------------------------------------------------------
 // Motor parameters
