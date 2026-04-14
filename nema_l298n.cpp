@@ -26,14 +26,17 @@
  * ─────────────────────────────────────────────────────────────────────────────
  *  L298N    │ 40-pin physical │ GPIO bank  │ gpiochip0 offset │ Function
  *  ─────────┼─────────────────┼────────────┼──────────────────┼──────────
- *  IN1      │ 11              │ GPIOX_6    │ 52               │ Coil A+
- *  IN2      │ 13              │ GPIOX_7    │ 53               │ Coil A−
- *  IN3      │ 29              │ GPIOX_4    │ 50               │ Coil B+
- *  IN4      │ 31              │ GPIOX_5    │ 51               │ Coil B−
+ *  IN1      │  7              │ GPIOX_6    │ 52               │ Coil A+
+ *  IN2      │ 11              │ GPIOX_17   │ 63               │ Coil A−
+ *  IN3      │ 13              │ GPIOX_18   │ 64               │ Coil B+
+ *  IN4      │ 15              │ GPIOX_19   │ 65               │ Coil B−
  *  ENA      │ jumper to 5V    │ -          │ -                │ Always enabled
  *  ENB      │ jumper to 5V    │ -          │ -                │ Always enabled
  *  VS (12V) │ external PSU    │ -          │ -                │ Motor power
  *  GND      │ any GND pin     │ -          │ -                │ Common ground
+ *
+ *  Verify offsets on target board:
+ *    gpioinfo gpiochip0 | grep -E "line (52|63|64|65)"
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * LoRa UART CONFLICT CHECK
