@@ -54,10 +54,10 @@ This system automates an in-field soil conductivity experiment deployed from a r
 - RYLR998 LoRa Transceiver → `/dev/ttyAML6` (UART_AO_B, physical pins 24/26)
 - Soil Sensor (Modbus RTU, 9600 baud) → `/dev/ttyUSB0`
 - L298N H-bridge motor controller wired directly to Le Potato GPIO (see `nema_l298n.cpp`):
-  - IN1 → physical pin 11 (GPIOX_6)
-  - IN2 → physical pin 13 (GPIOX_7)
-  - IN3 → physical pin 29 (GPIOX_4)
-  - IN4 → physical pin 31 (GPIOX_5)
+  - IN1 → physical pin 7  (GPIOX_6)
+  - IN2 → physical pin 11 (GPIOX_17)
+  - IN3 → physical pin 13 (GPIOX_18)
+  - IN4 → physical pin 15 (GPIOX_19)
   - ENA / ENB → 5V (jumper, always enabled)
   - VS → external 12V supply; GND shared with Le Potato
 
@@ -299,12 +299,12 @@ Down = phases 0→1→2→3. Up = phases 3→2→1→0. Coils are de-energised a
 
 **GPIO pin mapping (Le Potato 40-pin header):**
 
-| L298N | Physical pin | GPIO    | gpiochip0 offset |
-|-------|-------------|---------|-----------------|
-| IN1   | 11          | GPIOX_6 | 52              |
-| IN2   | 13          | GPIOX_7 | 53              |
-| IN3   | 29          | GPIOX_4 | 50              |
-| IN4   | 31          | GPIOX_5 | 51              |
+| L298N | Physical pin | GPIO     | gpiochip0 offset |
+|-------|-------------|----------|-----------------|
+| IN1   | 7           | GPIOX_6  | 52              |
+| IN2   | 11          | GPIOX_17 | 63              |
+| IN3   | 13          | GPIOX_18 | 64              |
+| IN4   | 15          | GPIOX_19 | 65              |
 
 These pins are in the GPIOX bank (`gpiochip0`) - entirely separate from the GPIOAO bank (`gpiochip1`) used by `/dev/ttyAML6` (UART_AO_B, physical 24/26). No conflict.
 
