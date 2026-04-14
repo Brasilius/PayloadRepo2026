@@ -7,9 +7,11 @@
  * bipolar motor driven via L298N dual H-bridge (IN1, IN2, IN3, IN4 ordering).
  * Speed is set in RPM - matching setSpeed() from the Arduino Stepper library.
  *
+ * GPIO access uses libgpiod (character device API) instead of the deprecated
+ * sysfs interface. No root required - gpio group membership is sufficient.
+ *
  * Build:
- *   g++ nema_l298n.cpp -o nema_l298n
- *   (requires root or gpio group membership to write /sys/class/gpio)
+ *   g++ nema_l298n.cpp -lgpiod -o nema_l298n
  *
  * Usage:
  *   ./nema_l298n D [rpm]    - full downward deployment (default 60 RPM)
@@ -45,46 +47,32 @@
  *    Physical  8 / 10  → GPIOAO_0/1   (UART_AO_A, ttyAML0)
  *    Physical 19/21/23 → GPIOX_8/9/11 (SPI MOSI/MISO/CLK)
  *    Physical 24       → GPIOX_10     (SPI CE0)
- *
- * ─────────────────────────────────────────────────────────────────────────────
- * TUNING THE GPIOCHIP0 BASE
- * ─────────────────────────────────────────────────────────────────────────────
- *  The sysfs GPIO number = GPIOCHIP0_BASE + gpiochip0_line_offset.
- *  GPIOCHIP0_BASE varies by kernel build. Find it on the board with:
- *
- *    cat /sys/class/gpio/gpiochip* base | sort -n
- *    # The lowest value printed = gpiochip0 (periphs-banks) base.
- *
- *  On the standard Libre Computer Ubuntu 22.04 BSP image: 410 (default below).
- *  Update GPIOCHIP0_BASE if your kernel reports a different value.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 #include <iostream>
-#include <fstream>
 #include <string>
 #include <unistd.h>     // usleep
 #include <chrono>
 #include <stdexcept>
 #include <cstdlib>      // std::stoi
+#include <gpiod.h>
 
 // ---------------------------------------------------------------------------
-// GPIO numbering
+// GPIO numbering  (line offsets within gpiochip0)
 // ---------------------------------------------------------------------------
-
-// Adjust if `cat /sys/class/gpio/gpiochip*/base | sort -n` gives a different
-// value for gpiochip0 on your kernel build.
-static const int GPIOCHIP0_BASE = 410;
 
 // GPIOX bank starts at offset 46 within gpiochip0 on AML-S905X periphs-banks.
 // (Layout: GPIODV[0-29] + GPIOY[30-45] + GPIOX[46-65] + …)
 static const int GPIOX_BASE = 46;
 
-// sysfs GPIO numbers for the four L298N control pins
-static const int GPIO_IN1 = GPIOCHIP0_BASE + GPIOX_BASE + 6;  // GPIOX_6, phy 11
-static const int GPIO_IN2 = GPIOCHIP0_BASE + GPIOX_BASE + 7;  // GPIOX_7, phy 13
-static const int GPIO_IN3 = GPIOCHIP0_BASE + GPIOX_BASE + 4;  // GPIOX_4, phy 29
-static const int GPIO_IN4 = GPIOCHIP0_BASE + GPIOX_BASE + 5;  // GPIOX_5, phy 31
+// gpiochip0 line offsets for the four L298N control pins
+static const int PIN_IN1 = GPIOX_BASE + 6;  // GPIOX_6, phy 11 - Coil A+
+static const int PIN_IN2 = GPIOX_BASE + 7;  // GPIOX_7, phy 13 - Coil A−
+static const int PIN_IN3 = GPIOX_BASE + 4;  // GPIOX_4, phy 29 - Coil B+
+static const int PIN_IN4 = GPIOX_BASE + 5;  // GPIOX_5, phy 31 - Coil B−
+
+static const int PIN_OFFSETS[4] = { PIN_IN1, PIN_IN2, PIN_IN3, PIN_IN4 };
 
 // ---------------------------------------------------------------------------
 // Motor parameters
@@ -117,41 +105,34 @@ static const int STEP_SEQ[SEQ_LEN][4] = {
 };
 
 // ---------------------------------------------------------------------------
-// sysfs GPIO helpers
+// libgpiod state
 // ---------------------------------------------------------------------------
 
-static void gpio_write_file(const std::string& path, const std::string& value) {
-    std::ofstream f(path);
-    if (!f.is_open()) {
-        throw std::runtime_error("Cannot open " + path);
-    }
-    f << value;
-    if (f.fail()) {
-        throw std::runtime_error("Write failed: " + path);
-    }
-}
+static gpiod_chip* chip        = nullptr;
+static gpiod_line* lines[4]    = {};
 
-// Export a GPIO pin to userspace (safe to call if already exported).
-static void gpio_export(int gpio) {
-    std::ofstream f("/sys/class/gpio/export");
-    if (f.is_open()) {
-        f << gpio;  // Suppress error if already exported - kernel returns EBUSY
+static void gpio_setup() {
+    chip = gpiod_chip_open_by_number(0);
+    if (!chip)
+        throw std::runtime_error("Cannot open /dev/gpiochip0 - check gpio group membership");
+
+    for (int i = 0; i < 4; ++i) {
+        lines[i] = gpiod_chip_get_line(chip, PIN_OFFSETS[i]);
+        if (!lines[i])
+            throw std::runtime_error("Cannot get line offset " + std::to_string(PIN_OFFSETS[i]));
+        if (gpiod_line_request_output(lines[i], "nema_l298n", 0) < 0)
+            throw std::runtime_error("Cannot request output on line " + std::to_string(PIN_OFFSETS[i]));
     }
 }
 
-static void gpio_configure_output(int gpio) {
-    usleep(50000);  // Wait for sysfs node to appear after export
-    gpio_write_file("/sys/class/gpio/gpio" + std::to_string(gpio) + "/direction", "out");
+static void gpio_set(int idx, int value) {
+    gpiod_line_set_value(lines[idx], value);
 }
 
-static void gpio_set(int gpio, int value) {
-    gpio_write_file("/sys/class/gpio/gpio" + std::to_string(gpio) + "/value",
-                    std::to_string(value));
-}
-
-static void gpio_unexport(int gpio) {
-    std::ofstream f("/sys/class/gpio/unexport");
-    if (f.is_open()) f << gpio;
+static void gpio_release() {
+    for (int i = 0; i < 4; ++i)
+        if (lines[i]) gpiod_line_release(lines[i]);
+    if (chip) gpiod_chip_close(chip);
 }
 
 // ---------------------------------------------------------------------------
@@ -159,10 +140,10 @@ static void gpio_unexport(int gpio) {
 // ---------------------------------------------------------------------------
 
 static void set_phase(int in1, int in2, int in3, int in4) {
-    gpio_set(GPIO_IN1, in1);
-    gpio_set(GPIO_IN2, in2);
-    gpio_set(GPIO_IN3, in3);
-    gpio_set(GPIO_IN4, in4);
+    gpio_set(0, in1);
+    gpio_set(1, in2);
+    gpio_set(2, in3);
+    gpio_set(3, in4);
 }
 
 // De-energise all coils (prevents heat buildup when stationary).
@@ -172,10 +153,7 @@ static void coils_off() {
 
 static void release_gpio() {
     coils_off();
-    gpio_unexport(GPIO_IN1);
-    gpio_unexport(GPIO_IN2);
-    gpio_unexport(GPIO_IN3);
-    gpio_unexport(GPIO_IN4);
+    gpio_release();
 }
 
 // Execute 'steps' full-steps at the given inter-step delay.
@@ -213,16 +191,12 @@ int main(int argc, char* argv[]) {
     int  rpm  = (argc >= 3) ? std::stoi(argv[2]) : DEFAULT_RPM;
     int  step_delay_us = rpm_to_step_delay_us(rpm);
 
-    // Export and configure all four control pins
-    const int pins[] = {GPIO_IN1, GPIO_IN2, GPIO_IN3, GPIO_IN4};
+    // Open gpiochip0 and request all four control lines as outputs
     try {
-        for (int p : pins) {
-            gpio_export(p);
-            gpio_configure_output(p);
-        }
+        gpio_setup();
     } catch (const std::runtime_error& e) {
         std::cerr << "[NEMA] GPIO setup failed: " << e.what() << "\n"
-                  << "[NEMA] Run as root or add user to the gpio group.\n";
+                  << "[NEMA] Install libgpiod and ensure user is in the gpio group.\n";
         release_gpio();
         return 1;
     }
