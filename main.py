@@ -6,19 +6,39 @@ import sys
 import json
 from datetime import datetime, timezone
 
+import gpiod
+
 # --- Configuration ---
 LORA_RECEIVER_EXEC = "./receivermodule"
 LORA_SENDER_EXEC   = "./transmittermodule"
 MODBUS_READER_EXEC = "./modbus_reader"
-NEMA_EXEC          = "./nema_l298n"      # L298N stepper controller (nema_l298n.cpp)
 
 LORA_PORT   = "/dev/ttyAML6"
 SENSOR_PORT = "/dev/ttyUSB0"
 
-# NEMA 17 full-step: 200 steps per revolution.
-# Used to convert the DONE:<steps>:<elapsed_ms> report into an RPM value
-# for the webUI telemetry payload.
-STEPS_PER_REV = 200
+# --- NEMA 17 GPIO configuration (gpiochip0 line offsets) ---
+# GPIOX bank starts at offset 46 within gpiochip0 on AML-S905X periphs-banks.
+GPIOX_BASE = 46
+
+PIN_IN1 = GPIOX_BASE + 6   # GPIOX_6,  physical 11 - Coil A+
+PIN_IN2 = GPIOX_BASE + 7   # GPIOX_7,  physical 13 - Coil A-
+PIN_IN3 = GPIOX_BASE + 4   # GPIOX_4,  physical 29 - Coil B+
+PIN_IN4 = GPIOX_BASE + 5   # GPIOX_5,  physical 31 - Coil B-
+
+NEMA_PIN_OFFSETS = [PIN_IN1, PIN_IN2, PIN_IN3, PIN_IN4]
+
+# Full-step sequence for bipolar NEMA 17 through L298N dual H-bridge.
+# Rows: (IN1, IN2, IN3, IN4).  Down = 0→1→2→3,  Up = 3→2→1→0.
+STEP_SEQ = [
+    (1, 0, 1, 0),   # phase 0: A+, B+
+    (0, 1, 1, 0),   # phase 1: A-, B+
+    (0, 1, 0, 1),   # phase 2: A-, B-
+    (1, 0, 0, 1),   # phase 3: A+, B-
+]
+
+STEPS_PER_REV = 200    # NEMA 17 full-step: 200 steps/rev (1.8°/step)
+DEPLOY_STEPS  = 4000   # Full travel distance - tune to your mechanism
+DEFAULT_RPM   = 60
 
 # --- Motor state - updated by deploy_nema() ---
 nema_step_count = 0
@@ -46,56 +66,58 @@ def monitor_receiver(process):
 
 
 # ---------------------------------------------------------------------------
-# NEMA motor deployment (L298N, nema_l298n.cpp)
+# NEMA motor deployment (L298N, direct GPIO via gpiod)
 # ---------------------------------------------------------------------------
 
 def deploy_nema(direction):
     """
-    Invokes ./nema_l298n with 'D' (down) or 'U' (up).
-    The C++ program drives the L298N via Le Potato GPIO sysfs, blocks until the
-    full deployment move is complete, then prints DONE:<steps>:<elapsed_ms>.
+    Drive the NEMA 17 stepper via the L298N H-bridge using gpiod directly.
+
+    direction='D' → forward step sequence (downward deployment)
+    direction='U' → reverse step sequence (upward deployment)
 
     Updates the global nema_step_count and motor_rpm used in telemetry.
+    Coils are de-energised after each move to prevent heat buildup.
     """
     global nema_step_count, motor_rpm
 
-    label = "DOWN" if direction == 'D' else "UP"
+    label     = "DOWN" if direction == 'D' else "UP"
+    down      = (direction == 'D')
+    step_delay = 60.0 / (DEFAULT_RPM * STEPS_PER_REV)  # seconds per step
+
     print(f"[NEMA] Deploying {label}...")
 
     try:
-        result = subprocess.run(
-            [NEMA_EXEC, direction],
-            capture_output=True,
-            text=True,
-            timeout=120     # Hard ceiling: 4000 steps × 2 ms = ~8 s in practice
-        )
+        chip  = gpiod.Chip('0')
+        lines = chip.get_lines(NEMA_PIN_OFFSETS)
+        lines.request(consumer='nema_stepper',
+                      type=gpiod.LINE_REQ_DIR_OUT,
+                      default_vals=[0, 0, 0, 0])
+    except Exception as e:
+        print(f"[NEMA] GPIO setup failed: {e}")
+        print("[NEMA] Ensure gpiod is installed and user is in the gpio group.")
+        return
 
-        if result.returncode != 0:
-            print(f"[NEMA] Controller exited with error ({result.returncode}).")
-            if result.stderr:
-                print(f"[NEMA] {result.stderr.strip()}")
-            return
+    t_start = time.monotonic()
 
-        output = result.stdout.strip()
-        if output.startswith('DONE:'):
-            parts = output.split(':')
-            if len(parts) == 3:
-                steps      = int(parts[1])
-                elapsed_ms = int(parts[2])
-                nema_step_count += steps
-                if elapsed_ms > 0:
-                    revolutions = steps / STEPS_PER_REV
-                    motor_rpm   = revolutions / (elapsed_ms / 60_000.0)
-                print(f"[NEMA] {label} complete - "
-                      f"steps: {steps}, elapsed: {elapsed_ms} ms, RPM: {motor_rpm:.1f}")
-        else:
-            print(f"[NEMA] Unexpected output: {output!r}")
+    try:
+        for i in range(DEPLOY_STEPS):
+            phase = (i % 4) if down else (3 - (i % 4))
+            lines.set_values(list(STEP_SEQ[phase]))
+            time.sleep(step_delay)
+    finally:
+        lines.set_values([0, 0, 0, 0])  # de-energise all coils
+        lines.release()
+        chip.close()
 
-    except subprocess.TimeoutExpired:
-        print(f"[NEMA] Timeout waiting for {label} deployment to finish.")
-    except FileNotFoundError:
-        print(f"[NEMA] Executable '{NEMA_EXEC}' not found. "
-              f"Compile with: g++ nema_l298n.cpp -o nema_l298n")
+    elapsed_ms = int((time.monotonic() - t_start) * 1000)
+    nema_step_count += DEPLOY_STEPS
+    if elapsed_ms > 0:
+        revolutions = DEPLOY_STEPS / STEPS_PER_REV
+        motor_rpm   = revolutions / (elapsed_ms / 60_000.0)
+
+    print(f"[NEMA] {label} complete - "
+          f"steps: {DEPLOY_STEPS}, elapsed: {elapsed_ms} ms, RPM: {motor_rpm:.1f}")
 
 
 # ---------------------------------------------------------------------------
@@ -202,8 +224,8 @@ def transmit_data(payload_dict):
 def execute_soil_test_sequence():
     """
     Triggered by command '2' from the base station:
-      1. Deploy NEMA motor fully downward via L298N (nema_l298n.cpp).
-      2. Deploy NEMA motor fully upward  via L298N (nema_l298n.cpp).
+      1. Deploy NEMA motor fully downward via L298N (direct GPIO).
+      2. Deploy NEMA motor fully upward  via L298N (direct GPIO).
       3. Read soil conductivity via Modbus (modbus.cpp) continuously,
          transmitting each reading as a JSON telemetry packet over LoRa.
     """

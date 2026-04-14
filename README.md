@@ -29,8 +29,8 @@ This system automates an in-field soil conductivity experiment deployed from a r
 | `recievermodule.cpp` | Le Potato - Board 4 | LoRa receiver; outputs payload to stdout for Python |
 | `transmittermodule.cpp` | Le Potato - Board 4 | LoRa transmitter; sends JSON telemetry to base station |
 | `modbus.cpp` | Le Potato - Board 4 | Reads soil electrical conductivity via Modbus RTU over serial |
-| `nema_l298n.cpp` | Le Potato - Board 4 | NEMA stepper controller via L298N wired directly to Le Potato GPIO |
-| `main.py` | Le Potato - Board 4 | Orchestrator: waits for initialize command, deploys motor, reads soil |
+| `nema_l298n.cpp` | Le Potato - Board 4 | Standalone NEMA stepper utility (retained for bench testing; motor logic is now in `main.py`) |
+| `main.py` | Le Potato - Board 4 | Orchestrator: waits for initialize command, drives NEMA motor via gpiod, reads soil |
 | `nema_hw216.ino` | Standalone | Legacy NEMA test sketch (HW216 on ESP32, not used in flight) |
 
 ---
@@ -51,15 +51,34 @@ This system automates an in-field soil conductivity experiment deployed from a r
 
 ### Payload SBC (Board 4)
 - AML-S905X (Libre Computer Le Potato) or equivalent SBC
-- RYLR998 LoRa Transceiver → `/dev/ttyAML6` (UART_AO_B, physical pins 24/26)
-- Soil Sensor (Modbus RTU, 9600 baud) → `/dev/ttyUSB0`
-- L298N H-bridge motor controller wired directly to Le Potato GPIO (see `nema_l298n.cpp`):
-  - IN1 → physical pin 7  (GPIOX_6)
-  - IN2 → physical pin 11 (GPIOX_17)
-  - IN3 → physical pin 13 (GPIOX_18)
-  - IN4 → physical pin 15 (GPIOX_19)
-  - ENA / ENB → 5V (jumper, always enabled)
-  - VS → external 12V supply; GND shared with Le Potato
+
+**RYLR998 LoRa Transceiver** (UART_AO_B — `gpiochip1`, separate from GPIOX):
+
+| Signal | Physical pin | GPIO      | Notes               |
+|--------|-------------|-----------|---------------------|
+| TX     | 24          | GPIOAO_4  | Le Potato → RYLR998 |
+| RX     | 26          | GPIOAO_5  | RYLR998 → Le Potato |
+| VCC    | any 3.3V    | —         | Module power        |
+| GND    | any GND     | —         | Common ground       |
+
+Serial port: `/dev/ttyAML6` at 115200 8N1.
+
+**L298N H-bridge + NEMA 17 stepper** (controlled directly by `main.py` via Python `gpiod` on `gpiochip0`):
+
+| L298N | Physical pin | GPIO     | gpiochip0 offset | Function |
+|-------|-------------|----------|-----------------|----------|
+| IN1   | 11          | GPIOX_6  | 52              | Coil A+  |
+| IN2   | 13          | GPIOX_7  | 53              | Coil A-  |
+| IN3   | 29          | GPIOX_4  | 50              | Coil B+  |
+| IN4   | 31          | GPIOX_5  | 51              | Coil B-  |
+| ENA   | jumper 5V   | —        | —               | Always enabled |
+| ENB   | jumper 5V   | —        | —               | Always enabled |
+| VS    | ext. 12V    | —        | —               | Motor power    |
+| GND   | any GND     | —        | —               | Common ground  |
+
+> The GPIOX lines (gpiochip0, offsets 50–53) are entirely separate from the GPIOAO lines (gpiochip1) used by `/dev/ttyAML6` — no conflict.
+
+**Soil Sensor** (Modbus RTU): → `/dev/ttyUSB0` at 9600 baud.
 
 ---
 
@@ -90,25 +109,25 @@ Both require the ESP32 board package installed in Arduino IDE.
 
 ### 2. Compile C++ Programs (Le Potato)
 
-On the Le Potato, compile all C++ modules:
+On the Le Potato, compile the C++ modules used at runtime:
 
 ```bash
 g++ -o modbus_reader     modbus.cpp
 g++ -o receivermodule    recievermodule.cpp
 g++ -o transmittermodule transmittermodule.cpp
-g++ -o nema_l298n        nema_l298n.cpp
 ```
 
-> `nema_l298n` writes to `/sys/class/gpio` - run as root or add the user to the `gpio` group:
-> ```bash
-> sudo usermod -aG gpio $USER   # then log out and back in
-> ```
-> If the default `GPIOCHIP0_BASE` (410) does not match your kernel, find the correct value with:
-> ```bash
-> cat /sys/class/gpio/gpiochip*/base | sort -n
-> # Lowest number = gpiochip0 base (periphs-banks)
-> ```
-> Then update `GPIOCHIP0_BASE` at the top of `nema_l298n.cpp` and recompile.
+`main.py` drives the NEMA motor directly via Python `gpiod` — no need to compile `nema_l298n.cpp` for normal operation. Ensure the `gpiod` Python package is available and the user is in the `gpio` group:
+
+```bash
+sudo usermod -aG gpio $USER   # then log out and back in
+```
+
+To build `nema_l298n.cpp` as a standalone test utility:
+
+```bash
+g++ -o nema_l298n nema_l298n.cpp -lgpiod
+```
 
 ### 3. Run the Payload Orchestrator
 
@@ -275,16 +294,16 @@ Outputs the raw hex response frame to `stdout`. `main.py` extracts bytes `[6:10]
 
 ---
 
-### `nema_l298n.cpp` - NEMA Stepper Controller (Le Potato, Board 4)
+### `nema_l298n.cpp` - Standalone NEMA Test Utility
 
-Drives a bipolar NEMA 17 stepper motor through an L298N dual H-bridge wired directly to the Le Potato GPIO header. No intermediate microcontroller - the Le Potato controls the motor itself via Linux sysfs GPIO.
+Retained for bench testing the motor independently of the payload stack. The flight-path motor logic now lives in `main.py` (`deploy_nema()`).
 
 ```bash
 ./nema_l298n D   # full downward deployment
 ./nema_l298n U   # full upward deployment
 ```
 
-On completion, prints `DONE:<steps>:<elapsed_ms>` to `stdout`. `main.py` parses this to calculate and track `motorRPM` and `stepCount` for the telemetry payload.
+On completion, prints `DONE:<steps>:<elapsed_ms>` to `stdout`.
 
 **Full-step sequence (4-phase, bipolar):**
 
@@ -301,12 +320,12 @@ Down = phases 0→1→2→3. Up = phases 3→2→1→0. Coils are de-energised a
 
 | L298N | Physical pin | GPIO     | gpiochip0 offset |
 |-------|-------------|----------|-----------------|
-| IN1   | 7           | GPIOX_6  | 52              |
-| IN2   | 11          | GPIOX_17 | 63              |
-| IN3   | 13          | GPIOX_18 | 64              |
-| IN4   | 15          | GPIOX_19 | 65              |
+| IN1   | 11          | GPIOX_6  | 52              |
+| IN2   | 13          | GPIOX_7  | 53              |
+| IN3   | 29          | GPIOX_4  | 50              |
+| IN4   | 31          | GPIOX_5  | 51              |
 
-These pins are in the GPIOX bank (`gpiochip0`) - entirely separate from the GPIOAO bank (`gpiochip1`) used by `/dev/ttyAML6` (UART_AO_B, physical 24/26). No conflict.
+These pins are in the GPIOX bank (`gpiochip0`) — entirely separate from the GPIOAO bank (`gpiochip1`) used by `/dev/ttyAML6` (UART_AO_B, physical 24/26). No conflict.
 
 ---
 
@@ -317,8 +336,8 @@ The top-level controller for the SBC:
 1. Launches `./receivermodule` as a persistent subprocess and monitors its stdout in a background thread.
 2. When string `2` is received (Initialize Payload command from the base station), calls `execute_soil_test_sequence()`.
 3. The sequence:
-   - Invokes `./nema_l298n D` - blocks until the NEMA motor completes full downward deployment.
-   - Invokes `./nema_l298n U` - blocks until the NEMA motor completes full upward deployment.
+   - Calls `deploy_nema('D')` — drives the stepper fully down by stepping through the 4-phase sequence directly via Python `gpiod` on `gpiochip0`. Runs synchronously in the main thread (no subprocess, no extra thread).
+   - Calls `deploy_nema('U')` — same as above but reversed phase order for upward travel.
    - Enters a continuous loop: reads soil conductivity via `./modbus_reader`, builds a JSON telemetry packet, and transmits it via `./transmittermodule`. Repeats every second indefinitely.
 4. Each telemetry packet includes `pingLatency`, `motorRPM`, `stepCount`, `soilConductivity`, and `timestamp` - matching the hardware JSON format expected by the dashboard.
 
