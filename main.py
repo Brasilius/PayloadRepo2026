@@ -88,7 +88,7 @@ def deploy_nema(direction):
     print(f"[NEMA] Deploying {label}...")
 
     try:
-        chip  = gpiod.Chip('gpiochip0')
+        chip  = gpiod.Chip('gpiochip1')
         lines = chip.get_lines(NEMA_PIN_OFFSETS)
         lines.request(consumer='nema_stepper',
                       type=gpiod.LINE_REQ_DIR_OUT,

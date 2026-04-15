@@ -22,7 +22,7 @@ import subprocess
 # ── Resources taken directly from main.py ─────────────────────────────────────
 LORA_PORT   = "/dev/ttyAML6"
 SENSOR_PORT = "/dev/ttyUSB0"
-GPIOCHIP    = "/dev/gpiochip0"
+GPIOCHIP    = "/dev/gpiochip1"
 
 EXECUTABLES = [
     "./receivermodule",
@@ -139,7 +139,7 @@ def check_gpiod_module():
 
 
 def check_gpiod_chip():
-    check_device(GPIOCHIP, "gpiochip0")
+    check_device(GPIOCHIP, "gpiochip1")
 
 
 def check_ldto_overlay():
