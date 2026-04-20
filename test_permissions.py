@@ -25,7 +25,7 @@ import subprocess
 LORA_PORT   = "/dev/ttyAML6"
 TMC_PORT    = "/dev/ttyAML0"   # TMC2209 UART (requires serial console disabled)
 SENSOR_PORT = "/dev/ttyUSB0"
-GPIOCHIP    = "/dev/gpiochip0"
+GPIOCHIP    = "/dev/gpiochip1"
 
 EXECUTABLES = [
     "./receivermodule",
@@ -151,7 +151,7 @@ def check_pyserial_module():
 
 
 def check_gpiod_chip():
-    check_device(GPIOCHIP, "gpiochip0")
+    check_device(GPIOCHIP, "gpiochip1")
 
 
 def check_ldto_overlay():
