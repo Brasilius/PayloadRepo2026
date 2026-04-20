@@ -15,7 +15,7 @@ This system automates an in-field soil conductivity experiment deployed from a r
 1. Ground operator sends **Separation Command** (cmd `1`) → Board 3 fires the ematch to deploy the payload.
 2. Board 3 continuously streams **altimeter telemetry** (altitude, pressure, temperature) back to the base station.
 3. Once the payload lands, operator sends **Initialize Payload** (cmd `2`) → Board 4 (Le Potato) triggers the soil test sequence.
-4. The Le Potato drives the NEMA stepper **fully down then fully up** via the L298N motor controller, then reads soil **electrical conductivity** via Modbus RTU and transmits JSON telemetry back over LoRa **continuously**.
+4. The Le Potato drives the NEMA stepper **fully down then fully up** via the TMC2209 stepper driver, then reads soil **electrical conductivity** via Modbus RTU and transmits JSON telemetry back over LoRa **continuously**.
 4. The Le Potato reads soil **electrical conductivity** via Modbus RTU and transmits the results back over LoRa - 20 iterations total.
 
 ---
@@ -29,7 +29,7 @@ This system automates an in-field soil conductivity experiment deployed from a r
 | `recievermodule.cpp` | Le Potato - Board 4 | LoRa receiver; outputs payload to stdout for Python |
 | `transmittermodule.cpp` | Le Potato - Board 4 | LoRa transmitter; sends JSON telemetry to base station |
 | `modbus.cpp` | Le Potato - Board 4 | Reads soil electrical conductivity via Modbus RTU over serial |
-| `nema_l298n.cpp` | Le Potato - Board 4 | Standalone NEMA stepper utility (retained for bench testing; motor logic is now in `main.py`) |
+| `nema_tmc2209.cpp` | Le Potato - Board 4 | Standalone NEMA stepper utility (retained for bench testing; motor logic is now in `main.py`) |
 | `main.py` | Le Potato - Board 4 | Orchestrator: waits for initialize command, drives NEMA motor via gpiod, reads soil |
 | `nema_hw216.ino` | Standalone | Legacy NEMA test sketch (HW216 on ESP32, not used in flight) |
 
@@ -63,20 +63,33 @@ This system automates an in-field soil conductivity experiment deployed from a r
 
 Serial port: `/dev/ttyAML6` at 115200 8N1.
 
-**L298N H-bridge + NEMA 17 stepper** (controlled directly by `main.py` via Python `gpiod` on `gpiochip0`):
+**TMC2209 stepper driver + NEMA 17** (STEP/DIR controlled by `main.py` and `nema_tmc2209` via gpiod on `gpiochip0`; configured at startup via UART_AO_A):
 
-| L298N | Physical pin | GPIO     | gpiochip0 offset | Function |
-|-------|-------------|----------|-----------------|----------|
-| IN1   | 11          | GPIOX_6  | 52              | Coil A+  |
-| IN2   | 13          | GPIOX_7  | 53              | Coil A-  |
-| IN3   | 29          | GPIOX_4  | 50              | Coil B+  |
-| IN4   | 31          | GPIOX_5  | 51              | Coil B-  |
-| ENA   | jumper 5V   | —        | —               | Always enabled |
-| ENB   | jumper 5V   | —        | —               | Always enabled |
-| VS    | ext. 12V    | —        | —               | Motor power    |
-| GND   | any GND     | —        | —               | Common ground  |
+| TMC2209 | Physical pin | GPIO     | gpiochip0 offset | Function                      |
+|---------|-------------|----------|------------------|-------------------------------|
+| STEP    | 11          | GPIOX_6  | 52               | Step pulse output             |
+| DIR     | 13          | GPIOX_7  | 53               | Direction (LOW=down, HIGH=up) |
+| EN      | 29          | GPIOX_4  | 50               | Enable (active LOW)           |
+| (spare) | 31          | GPIOX_5  | 51               | Available (DIAG or future use)|
+| VM      | ext. 12V    | —        | —                | Motor power                   |
+| GND     | any GND     | —        | —                | Common ground                 |
 
-> The GPIOX lines (gpiochip0, offsets 50–53) are entirely separate from the GPIOAO lines (gpiochip1) used by `/dev/ttyAML6` — no conflict.
+TMC2209 UART configuration (single-wire PDN_UART pin → UART_AO_A):
+
+| Signal   | Physical pin | GPIO     | Notes                        |
+|----------|-------------|----------|------------------------------|
+| TX (AO_A)| 8           | GPIOAO_0 | Le Potato → TMC2209 PDN_UART |
+| RX (AO_A)| 10          | GPIOAO_1 | TMC2209 PDN_UART → Le Potato |
+
+Serial port: `/dev/ttyAML0` at 115200 8N1. Driver node address: `0b00` (MS1=GND, MS2=GND).
+
+> **Prerequisite**: disable the kernel serial console on `ttyAML0` before use:
+> ```
+> sudo systemctl disable serial-getty@ttyAML0.service
+> # Remove "console=ttyAML0,115200n8" from /boot/armbianEnv.txt, then reboot.
+> ```
+
+> The GPIOX lines (gpiochip0, offsets 50–53) are entirely separate from the GPIOAO lines (gpiochip1) used by `/dev/ttyAML0` (TMC2209 UART) and `/dev/ttyAML6` (LoRa) — no conflict.
 
 **Soil Sensor** (Modbus RTU): → `/dev/ttyUSB0` at 9600 baud.
 
@@ -117,16 +130,16 @@ g++ -o receivermodule    recievermodule.cpp
 g++ -o transmittermodule transmittermodule.cpp
 ```
 
-`main.py` drives the NEMA motor directly via Python `gpiod` — no need to compile `nema_l298n.cpp` for normal operation. Ensure the `gpiod` Python package is available and the user is in the `gpio` group:
+`main.py` drives the NEMA motor directly via Python `gpiod` — no need to compile `nema_tmc2209.cpp` for normal operation. Ensure the `gpiod` Python package is available and the user is in the `gpio` group:
 
 ```bash
 sudo usermod -aG gpio $USER   # then log out and back in
 ```
 
-To build `nema_l298n.cpp` as a standalone test utility:
+To build `nema_tmc2209.cpp` as a standalone test utility:
 
 ```bash
-g++ -o nema_l298n nema_l298n.cpp -lgpiod
+g++ -o nema_tmc2209 nema_tmc2209.cpp -lgpiod
 ```
 
 ### 3. Run the Payload Orchestrator
@@ -294,38 +307,28 @@ Outputs the raw hex response frame to `stdout`. `main.py` extracts bytes `[6:10]
 
 ---
 
-### `nema_l298n.cpp` - Standalone NEMA Test Utility
+### `nema_tmc2209.cpp` - Standalone NEMA Test Utility
 
 Retained for bench testing the motor independently of the payload stack. The flight-path motor logic now lives in `main.py` (`deploy_nema()`).
 
 ```bash
-./nema_l298n D   # full downward deployment
-./nema_l298n U   # full upward deployment
+./nema_tmc2209 D   # full downward deployment
+./nema_tmc2209 U   # full upward deployment
 ```
 
 On completion, prints `DONE:<steps>:<elapsed_ms>` to `stdout`.
 
-**Full-step sequence (4-phase, bipolar):**
-
-| Phase | IN1 | IN2 | IN3 | IN4 |
-|-------|-----|-----|-----|-----|
-| 0     | 1   | 0   | 1   | 0   |
-| 1     | 0   | 1   | 1   | 0   |
-| 2     | 0   | 1   | 0   | 1   |
-| 3     | 1   | 0   | 0   | 1   |
-
-Down = phases 0→1→2→3. Up = phases 3→2→1→0. Coils are de-energised after each move to prevent heat buildup.
+Configures the TMC2209 via UART (`/dev/ttyAML0`) at startup (StealthChop, ~587 mA run current, full-step input with 256-µstep interpolation), then steps the motor by pulsing the STEP line. EN is asserted LOW during movement and released HIGH afterward to reduce driver heat at rest.
 
 **GPIO pin mapping (Le Potato 40-pin header):**
 
-| L298N | Physical pin | GPIO     | gpiochip0 offset |
-|-------|-------------|----------|-----------------|
-| IN1   | 11          | GPIOX_6  | 52              |
-| IN2   | 13          | GPIOX_7  | 53              |
-| IN3   | 29          | GPIOX_4  | 50              |
-| IN4   | 31          | GPIOX_5  | 51              |
+| TMC2209 | Physical pin | GPIO     | gpiochip0 offset | Function                      |
+|---------|-------------|----------|------------------|-------------------------------|
+| STEP    | 11          | GPIOX_6  | 52               | Step pulse                    |
+| DIR     | 13          | GPIOX_7  | 53               | Direction (LOW=down, HIGH=up) |
+| EN      | 29          | GPIOX_4  | 50               | Enable (active LOW)           |
 
-These pins are in the GPIOX bank (`gpiochip0`) — entirely separate from the GPIOAO bank (`gpiochip1`) used by `/dev/ttyAML6` (UART_AO_B, physical 24/26). No conflict.
+These pins are in the GPIOX bank (`gpiochip0`) — entirely separate from the GPIOAO bank (`gpiochip1`) used by `/dev/ttyAML0` (TMC2209 UART, physical 8/10) and `/dev/ttyAML6` (LoRa, physical 24/26). No conflict.
 
 ---
 
@@ -336,8 +339,8 @@ The top-level controller for the SBC:
 1. Launches `./receivermodule` as a persistent subprocess and monitors its stdout in a background thread.
 2. When string `2` is received (Initialize Payload command from the base station), calls `execute_soil_test_sequence()`.
 3. The sequence:
-   - Calls `deploy_nema('D')` — drives the stepper fully down by stepping through the 4-phase sequence directly via Python `gpiod` on `gpiochip0`. Runs synchronously in the main thread (no subprocess, no extra thread).
-   - Calls `deploy_nema('U')` — same as above but reversed phase order for upward travel.
+   - Calls `deploy_nema('D')` — drives the stepper fully down by pulsing the TMC2209 STEP/DIR GPIO lines via Python `gpiod` on `gpiochip0`. Runs synchronously in the main thread (no subprocess, no extra thread).
+   - Calls `deploy_nema('U')` — same as above but with DIR=HIGH for upward travel.
    - Enters a continuous loop: reads soil conductivity via `./modbus_reader`, builds a JSON telemetry packet, and transmits it via `./transmittermodule`. Repeats every second indefinitely.
 4. Each telemetry packet includes `pingLatency`, `motorRPM`, `stepCount`, `soilConductivity`, and `timestamp` - matching the hardware JSON format expected by the dashboard.
 
