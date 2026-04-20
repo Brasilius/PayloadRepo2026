@@ -4,8 +4,10 @@ test_permissions.py — Pre-flight permission and resource check for main.py
                        on Le Potato (AML-S905X-CC).
 
 Verifies every external dependency that main.py touches:
-  - Serial devices  : /dev/ttyAML6 (LoRa), /dev/ttyUSB0 (Modbus sensor)
+  - Serial devices  : /dev/ttyAML6 (LoRa), /dev/ttyAML0 (TMC2209 UART),
+                      /dev/ttyUSB0 (Modbus sensor)
   - GPIO            : /dev/gpiochip0, gpiod Python library, user gpio group
+  - Python modules  : gpiod, pyserial
   - Executables     : receivermodule, transmittermodule, modbus_reader
   - Groups          : dialout (serial), gpio
 
@@ -21,6 +23,7 @@ import subprocess
 
 # ── Resources taken directly from main.py ─────────────────────────────────────
 LORA_PORT   = "/dev/ttyAML6"
+TMC_PORT    = "/dev/ttyAML0"   # TMC2209 UART (requires serial console disabled)
 SENSOR_PORT = "/dev/ttyUSB0"
 GPIOCHIP    = "/dev/gpiochip1"
 
@@ -135,7 +138,16 @@ def check_gpiod_module():
         ok("Python gpiod module importable")
     except ImportError:
         fail("Python gpiod module importable",
-             "pip install gpiod  or  apt install python3-gpiod")
+             "pip install 'gpiod>=1.5,<2.0'  or  apt install python3-gpiod")
+
+
+def check_pyserial_module():
+    try:
+        import serial  # noqa: F401
+        ok("Python pyserial module importable")
+    except ImportError:
+        fail("Python pyserial module importable",
+             "pip install pyserial  or  apt install python3-serial")
 
 
 def check_gpiod_chip():
@@ -183,13 +195,15 @@ def main():
     print("=" * 56)
 
     print("\n--- Serial devices ---")
-    check_device(LORA_PORT,   "LoRa port  (ttyAML6)")
+    check_device(LORA_PORT,   "LoRa port    (ttyAML6)")
     check_ldto_overlay()
-    check_device(SENSOR_PORT, "Sensor port (ttyUSB0)")
+    check_device(TMC_PORT,    "TMC2209 UART (ttyAML0) — requires serial console disabled")
+    check_device(SENSOR_PORT, "Sensor port  (ttyUSB0)")
 
     print("\n--- GPIO ---")
     check_gpiod_chip()
     check_gpiod_module()
+    check_pyserial_module()
 
     print("\n--- User group membership ---")
     for g in REQUIRED_GROUPS:

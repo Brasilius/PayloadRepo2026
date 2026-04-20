@@ -7,44 +7,54 @@ import json
 from datetime import datetime, timezone
 
 import gpiod
+import serial  # pyserial — TMC2209 UART configuration
 
-# --- Configuration ---
+# --- Process executables ---
 LORA_RECEIVER_EXEC = "./receivermodule"
 LORA_SENDER_EXEC   = "./transmittermodule"
 MODBUS_READER_EXEC = "./modbus_reader"
 
-LORA_PORT   = "/dev/ttyAML6"
-SENSOR_PORT = "/dev/ttyUSB0"
+# --- Serial ports ---
+LORA_PORT   = "/dev/ttyAML6"   # UART_AO_B: physical 24 (TX, GPIOAO_4) / 26 (RX, GPIOAO_5)
+SENSOR_PORT = "/dev/ttyUSB0"   # Modbus RTU soil conductivity sensor
 
-# --- NEMA 17 GPIO configuration (gpiochip0 line offsets) ---
-# GPIOX bank starts at offset 46 within gpiochip0 on AML-S905X periphs-banks.
+# --- TMC2209 GPIO (gpiochip0 line offsets on AML-S905X periphs-banks) ---
+# GPIOX bank starts at offset 46 within gpiochip0.
 GPIOX_BASE = 46
 
-PIN_IN1 = GPIOX_BASE + 6   # GPIOX_6,  physical 11 - Coil A+
-PIN_IN2 = GPIOX_BASE + 7   # GPIOX_7,  physical 13 - Coil A-
-PIN_IN3 = GPIOX_BASE + 4   # GPIOX_4,  physical 29 - Coil B+
-PIN_IN4 = GPIOX_BASE + 5   # GPIOX_5,  physical 31 - Coil B-
+PIN_STEP = GPIOX_BASE + 6   # GPIOX_6, physical 11 — STEP pulse output
+PIN_DIR  = GPIOX_BASE + 7   # GPIOX_7, physical 13 — DIR (LOW=down, HIGH=up)
+PIN_EN   = GPIOX_BASE + 4   # GPIOX_4, physical 29 — EN (active LOW to enable driver)
+# GPIOX_5, offset 51, physical 31: unassigned — available for DIAG or future use
 
-NEMA_PIN_OFFSETS = [PIN_IN1, PIN_IN2, PIN_IN3, PIN_IN4]
+# --- TMC2209 UART (UART_AO_A) ---
+# Physical 8 (TX, GPIOAO_0) / 10 (RX, GPIOAO_1) → /dev/ttyAML0
+# PREREQUISITE: disable the serial console on ttyAML0 before use:
+#   sudo systemctl disable serial-getty@ttyAML0.service
+#   remove "console=ttyAML0,115200n8" from the kernel command line (e.g. /boot/armbianEnv.txt)
+#   then reboot
+TMC_UART_PORT   = "/dev/ttyAML0"
+TMC_UART_BAUD   = 115200
+TMC_DRIVER_ADDR = 0b00   # UART node address: determined by MS1/MS2 pins (both GND → addr 0)
 
-# Full-step sequence for bipolar NEMA 17 through L298N dual H-bridge.
-# Rows: (IN1, IN2, IN3, IN4).  Down = 0→1→2→3,  Up = 3→2→1→0.
-STEP_SEQ = [
-    (1, 0, 1, 0),   # phase 0: A+, B+
-    (0, 1, 1, 0),   # phase 1: A-, B+
-    (0, 1, 0, 1),   # phase 2: A-, B-
-    (1, 0, 0, 1),   # phase 3: A+, B-
-]
-
-STEPS_PER_REV = 200    # NEMA 17 full-step: 200 steps/rev (1.8°/step)
-DEPLOY_STEPS  = 4000   # Full travel distance - tune to your mechanism
+# --- Motor parameters ---
+# MRES=8 (full-step GPIO input) + intpol=1 (TMC2209 interpolates to 256 μsteps).
+# step_delay = 60 / (RPM × STEPS_PER_REV) = 5 ms at 60 RPM → reliable with time.sleep().
+STEPS_PER_REV = 200          # NEMA 17: 1.8° × 200 = 360°
+DEPLOY_STEPS  = 4000         # 20 revolutions of linear travel (tune to mechanism)
 DEFAULT_RPM   = 60
 
-# --- Motor state - updated by deploy_nema() ---
+# --- TMC2209 register addresses ---
+_REG_GCONF      = 0x00
+_REG_IHOLD_IRUN = 0x10
+_REG_CHOPCONF   = 0x6C
+_REG_PWMCONF    = 0x70
+
+# --- Motor state (updated by deploy_nema, read by build_telemetry) ---
 nema_step_count = 0
 motor_rpm       = 0.0
 
-# Queue for passing LoRa commands from the receiver thread to the main loop
+# --- Command queue: receiver thread → main loop ---
 command_queue = queue.Queue()
 
 
@@ -54,8 +64,8 @@ command_queue = queue.Queue()
 
 def monitor_receiver(process):
     """
-    Reads stdout from the persistent C++ receiver process.
-    Enqueues '2' when the base station fires the Initialize Payload command
+    Reads stdout from the persistent LoRa receiver subprocess.
+    Enqueues '2' when the base station sends the Initialize Payload command
     (basestation.ino: AT+SEND to Address 4, payload '2').
     """
     for line in iter(process.stdout.readline, ''):
@@ -66,33 +76,125 @@ def monitor_receiver(process):
 
 
 # ---------------------------------------------------------------------------
-# NEMA motor deployment (L298N, direct GPIO via gpiod)
+# TMC2209 UART register access
 # ---------------------------------------------------------------------------
 
-def deploy_nema(direction):
+def _tmc_crc8(data: bytes) -> int:
+    # CRC-8 per TMC2209 datasheet: poly=0x07, init=0x00, data bits processed LSB-first.
+    crc = 0
+    for byte in data:
+        for _ in range(8):
+            if (crc >> 7) ^ (byte & 0x01):
+                crc = ((crc << 1) ^ 0x07) & 0xFF
+            else:
+                crc = (crc << 1) & 0xFF
+            byte >>= 1
+    return crc
+
+
+def _tmc_write_reg(ser: serial.Serial, reg: int, value: int) -> None:
+    # 8-byte write datagram: [0x05, addr, reg|0x80, data[31:24..7:0], CRC]
+    # Single-wire UART echoes TX bytes back on RX — discard them after write.
+    payload = bytes([
+        0x05,
+        TMC_DRIVER_ADDR,
+        reg | 0x80,
+        (value >> 24) & 0xFF,
+        (value >> 16) & 0xFF,
+        (value >>  8) & 0xFF,
+        value         & 0xFF,
+    ])
+    ser.write(payload + bytes([_tmc_crc8(payload)]))
+    ser.flush()
+    ser.read(8)  # discard echo
+
+
+def _tmc_read_reg(ser: serial.Serial, reg: int) -> int | None:
+    # 4-byte read request; TMC2209 replies with 8-byte datagram after the echo.
+    req = bytes([0x05, TMC_DRIVER_ADDR, reg])
+    ser.write(req + bytes([_tmc_crc8(req)]))
+    ser.flush()
+    ser.read(4)  # discard echo of request
+    resp = ser.read(8)
+    if len(resp) < 8 or resp[7] != _tmc_crc8(resp[:7]):
+        return None
+    return (resp[3] << 24) | (resp[4] << 16) | (resp[5] << 8) | resp[6]
+
+
+def init_tmc2209() -> bool:
     """
-    Drive the NEMA 17 stepper via the L298N H-bridge using gpiod directly.
+    Configure the TMC2209 via UART on ttyAML0.
 
-    direction='D' → forward step sequence (downward deployment)
-    direction='U' → reverse step sequence (upward deployment)
+    GCONF      0x000000C0 — StealthChop, PDN_UART disabled, MRES from CHOPCONF
+    IHOLD_IRUN 0x00060804 — IHOLDDELAY=6, IRUN=8, IHOLD=4
+                            I_RMS(run)  = 9/32 × 0.325 V / (√2 × 0.11 Ω) ≈ 587 mA
+                            I_RMS(hold) = 5/32 × 0.325 V / (√2 × 0.11 Ω) ≈ 326 mA
+                            (assumes R_SENSE = 0.11 Ω; adjust IRUN/IHOLD for other boards)
+    CHOPCONF   0x18000005 — TOFF=5 (enable), MRES=8 (full-step input), intpol=1
+    PWMCONF    0xC10D0024 — StealthChop PWM defaults (Trinamic recommended)
 
-    Updates the global nema_step_count and motor_rpm used in telemetry.
-    Coils are de-energised after each move to prevent heat buildup.
+    Returns True on success.  On UART failure the driver runs with power-on
+    defaults (SpreadCycle, 1/8 μsteps) and motor operation continues.
+    """
+    try:
+        with serial.Serial(
+            TMC_UART_PORT,
+            TMC_UART_BAUD,
+            bytesize=serial.EIGHTBITS,
+            parity=serial.PARITY_NONE,
+            stopbits=serial.STOPBITS_ONE,
+            timeout=0.1,
+        ) as ser:
+            _tmc_write_reg(ser, _REG_GCONF,      0x000000C0)
+            _tmc_write_reg(ser, _REG_IHOLD_IRUN, 0x00060804)
+            _tmc_write_reg(ser, _REG_CHOPCONF,   0x18000005)
+            _tmc_write_reg(ser, _REG_PWMCONF,    0xC10D0024)
+
+        print("[TMC2209] Driver configured via UART.")
+        return True
+
+    except serial.SerialException as e:
+        print(f"[TMC2209] UART init failed ({TMC_UART_PORT}): {e}")
+        print("[TMC2209] Running with power-on defaults. "
+              "Disable the serial console on ttyAML0 (see TMC_UART_PORT comment).")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# NEMA motor deployment (TMC2209 STEP/DIR via gpiod)
+# ---------------------------------------------------------------------------
+
+def deploy_nema(direction: str) -> None:
+    """
+    Drive the NEMA 17 stepper via TMC2209 STEP/DIR GPIO pulses (gpiochip0).
+
+    direction='D' → DIR=LOW  (downward deployment)
+    direction='U' → DIR=HIGH (upward deployment)
+
+    The TMC2209 CHOPCONF intpol=1 setting causes the driver to internally
+    interpolate each full-step GPIO pulse to a 256-μstep waveform, giving
+    smooth, quiet motion without requiring high-rate pulse generation from Python.
+
+    EN is held LOW (active) during movement and deasserted HIGH afterward so
+    the driver can power down its output stage and reduce heat at rest.
     """
     global nema_step_count, motor_rpm
 
-    label     = "DOWN" if direction == 'D' else "UP"
-    down      = (direction == 'D')
-    step_delay = 60.0 / (DEFAULT_RPM * STEPS_PER_REV)  # seconds per step
+    label      = "DOWN" if direction == 'D' else "UP"
+    step_delay = 60.0 / (DEFAULT_RPM * STEPS_PER_REV)
 
-    print(f"[NEMA] Deploying {label}...")
+    print(f"[NEMA] Deploying {label} ({DEPLOY_STEPS} steps at {DEFAULT_RPM} RPM)...")
 
     try:
-        chip  = gpiod.Chip('gpiochip1')
-        lines = chip.get_lines(NEMA_PIN_OFFSETS)
-        lines.request(consumer='nema_stepper',
-                      type=gpiod.LINE_REQ_DIR_OUT,
-                      default_vals=[0, 0, 0, 0])
+        chip      = gpiod.Chip('0')
+        step_line = chip.get_line(PIN_STEP)
+        dir_line  = chip.get_line(PIN_DIR)
+        en_line   = chip.get_line(PIN_EN)
+
+        step_line.request(consumer='nema_step', type=gpiod.LINE_REQ_DIR_OUT, default_vals=[0])
+        dir_line.request( consumer='nema_dir',  type=gpiod.LINE_REQ_DIR_OUT, default_vals=[0])
+        en_line.request(  consumer='nema_en',   type=gpiod.LINE_REQ_DIR_OUT, default_vals=[1])
+
     except Exception as e:
         print(f"[NEMA] GPIO setup failed: {e}")
         print("[NEMA] Ensure gpiod is installed and user is in the gpio group.")
@@ -101,13 +203,23 @@ def deploy_nema(direction):
     t_start = time.monotonic()
 
     try:
-        for i in range(DEPLOY_STEPS):
-            phase = (i % 4) if down else (3 - (i % 4))
-            lines.set_values(list(STEP_SEQ[phase]))
-            time.sleep(step_delay)
+        dir_line.set_value(0 if direction == 'D' else 1)
+        en_line.set_value(0)      # Enable driver (active LOW)
+        time.sleep(0.001)         # 1 ms EN→STEP setup time per TMC2209 datasheet
+
+        half_delay = step_delay / 2
+        for _ in range(DEPLOY_STEPS):
+            step_line.set_value(1)
+            time.sleep(half_delay)
+            step_line.set_value(0)
+            time.sleep(half_delay)
+
     finally:
-        lines.set_values([0, 0, 0, 0])  # de-energise all coils
-        lines.release()
+        en_line.set_value(1)      # Disable driver (reduces heat at rest)
+        step_line.set_value(0)
+        step_line.release()
+        dir_line.release()
+        en_line.release()
         chip.close()
 
     elapsed_ms = int((time.monotonic() - t_start) * 1000)
@@ -116,7 +228,7 @@ def deploy_nema(direction):
         revolutions = DEPLOY_STEPS / STEPS_PER_REV
         motor_rpm   = revolutions / (elapsed_ms / 60_000.0)
 
-    print(f"[NEMA] {label} complete - "
+    print(f"[NEMA] {label} complete — "
           f"steps: {DEPLOY_STEPS}, elapsed: {elapsed_ms} ms, RPM: {motor_rpm:.1f}")
 
 
@@ -127,7 +239,7 @@ def deploy_nema(direction):
 def read_soil_conductivity():
     """
     Calls ./modbus_reader, parses the raw hex Modbus RTU response, and returns
-    the electrical conductivity as an integer (µS/cm), or None on failure.
+    electrical conductivity as an integer (µS/cm), or None on failure.
     """
     try:
         result = subprocess.run(
@@ -151,7 +263,7 @@ def read_soil_conductivity():
 
 
 # ---------------------------------------------------------------------------
-# Telemetry - JSON format required by the webUI dashboard
+# Telemetry — JSON format required by the web dashboard
 # ---------------------------------------------------------------------------
 
 def build_telemetry(conductivity, ping_ms):
@@ -159,13 +271,8 @@ def build_telemetry(conductivity, ping_ms):
     Returns a dict matching the hardware JSON format consumed by server.js
     and rendered by the React dashboard (useSerialData.ts → TelemetryData):
 
-      {
-        "pingLatency":      <int ms>          - LoRa transmit round-trip
-        "motorRPM":         <float>           - NEMA RPM during last deployment
-        "stepCount":        <int>             - cumulative NEMA steps
-        "soilConductivity": <float µS/cm>     - Modbus register 0x0015
-        "timestamp":        <ISO-8601 UTC>
-      }
+      { "pingLatency": <int ms>, "motorRPM": <float>, "stepCount": <int>,
+        "soilConductivity": <float µS/cm>, "timestamp": <ISO-8601 UTC> }
     """
     return {
         "pingLatency":      ping_ms,
@@ -178,15 +285,8 @@ def build_telemetry(conductivity, ping_ms):
 
 def transmit_data(payload_dict):
     """
-    JSON-serialises the telemetry dict and passes it as a single string
-    argument to ./transmittermodule, which encodes it in a LoRa AT+SEND frame
-    and forwards it to the base station (Address 2).
-
-    server.js on the base station calls JSON.parse() on each received line,
-    so the payload must be a single compact JSON string.
-
-    Returns the measured transmit latency in ms (used as next pingLatency),
-    or 0 on failure.
+    JSON-serialises the telemetry dict and passes it to ./transmittermodule.
+    Returns the measured transmit latency in ms, or 0 on failure.
     """
     try:
         payload_str = json.dumps(payload_dict, separators=(',', ':'))
@@ -201,7 +301,7 @@ def transmit_data(payload_dict):
         output  = result.stdout.strip()
 
         if "+OK" in output:
-            print(f"[TX] {len(payload_str)} B - "
+            print(f"[TX] {len(payload_str)} B — "
                   f"conductivity={payload_dict['soilConductivity']:.2f} µS/cm, "
                   f"ping={ping_ms} ms")
             return ping_ms
@@ -224,14 +324,14 @@ def transmit_data(payload_dict):
 def execute_soil_test_sequence():
     """
     Triggered by command '2' from the base station:
-      1. Deploy NEMA motor fully downward via L298N (direct GPIO).
-      2. Deploy NEMA motor fully upward  via L298N (direct GPIO).
-      3. Read soil conductivity via Modbus (modbus.cpp) continuously,
-         transmitting each reading as a JSON telemetry packet over LoRa.
+      1. Deploy NEMA motor fully down via TMC2209 STEP/DIR GPIO.
+      2. Deploy NEMA motor fully up.
+      3. Read soil conductivity via Modbus continuously, transmitting each
+         reading as a JSON telemetry packet over LoRa.
     """
     print("\n--- NEMA Motor Deployment ---")
-    deploy_nema('D')    # Full downward travel
-    deploy_nema('U')    # Full upward travel
+    deploy_nema('D')
+    deploy_nema('U')
     print("--- Deployment Complete ---\n")
 
     print("--- Starting Continuous Soil Sensing ---")
@@ -242,7 +342,7 @@ def execute_soil_test_sequence():
             payload = build_telemetry(conductivity, ping_ms)
             ping_ms = transmit_data(payload)
         else:
-            print("[Sequence] Modbus read failed - skipping transmission.")
+            print("[Sequence] Modbus read failed — skipping transmission.")
         time.sleep(1)
 
 
@@ -252,6 +352,8 @@ def execute_soil_test_sequence():
 
 def main():
     print("Initializing system...")
+
+    init_tmc2209()
 
     try:
         receiver_process = subprocess.Popen(
