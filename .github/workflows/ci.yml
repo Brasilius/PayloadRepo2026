@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgpiod-dev
+      - name: Build
+        run: bash build.sh
+      - name: Run Tests
+        run: bash tests/run_tests.sh

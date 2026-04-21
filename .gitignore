@@ -1,1 +1,6 @@
 node_modules/
+build/
+modbus
+nema_l298n
+receivermodule
+transmittermodule

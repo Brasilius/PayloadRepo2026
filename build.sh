@@ -8,7 +8,7 @@ set -e
 BUILD_DIR="."
 TESTS_OUT_DIR="build/tests"
 CXX="${CXX:-g++}"
-CXXFLAGS="-std=c++17 -Wall -Wextra -O2"
+CXXFLAGS="-std=c++17 -Wall -Wextra -O2 -lgpiod"
 
 # ── Main modules ─────────────────────────────────────────────────────────────
 MAIN_SOURCES=(
@@ -56,7 +56,7 @@ for entry in "${MAIN_SOURCES[@]}"; do
     src="${entry%%:*}"
     out="$BUILD_DIR/${entry##*:}"
     printf "  %-30s -> %s\n" "$src" "$out"
-    if $CXX $CXXFLAGS "$src" -o "$out" 2>&1; then
+    if $CXX "$src" -o "$out" $CXXFLAGS 2>&1; then
         :
     else
         FAILED+=("$src")
@@ -69,7 +69,7 @@ for entry in "${TEST_SOURCES[@]}"; do
     src="${entry%%:*}"
     out="$TESTS_OUT_DIR/$(basename ${entry##*:})"
     printf "  %-40s -> %s\n" "$src" "$out"
-    if $CXX $CXXFLAGS "$src" -o "$out" 2>&1; then
+    if $CXX "$src" -o "$out" $CXXFLAGS 2>&1; then
         :
     else
         FAILED+=("$src")
